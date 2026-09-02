@@ -25,7 +25,7 @@ const browser = await chromium.launch({
     ? [`--host-resolver-rules=MAP ${new URL(baseUrl).hostname} ${resolverTarget}`]
     : [],
 });
-const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
 const browserErrors = [];
 
 page.on("pageerror", (error) => browserErrors.push(`page: ${error.message}`));
@@ -46,9 +46,25 @@ async function shot(name, fullPage = true) {
   await page.screenshot({ path: resolve(outputDir, name), fullPage });
 }
 
+async function settleLandingAssets() {
+  await page.evaluate(async () => {
+    const step = Math.max(420, Math.floor(window.innerHeight * .72));
+    for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
+      window.scrollTo(0, y);
+      await new Promise((done) => setTimeout(done, 80));
+    }
+    window.scrollTo(0, 0);
+    await Promise.all([...document.images].map(async (image) => {
+      if (image.decode) await image.decode().catch(() => {});
+      if (image.naturalWidth === 0) throw new Error(`Image failed to load: ${image.currentSrc || image.src}`);
+    }));
+  });
+}
+
 try {
   await open("/");
   await page.getByRole("heading", { name: /Every payment posts once/i }).waitFor();
+  await settleLandingAssets();
   await shot("landing.png");
 
   await open("/demo");
@@ -70,14 +86,15 @@ try {
   await shot("control-room-mobile.png");
 
   await open("/");
-  const hero = page.locator(".hero h1");
+  const hero = page.locator(".home-hero h1");
   await hero.waitFor();
+  await settleLandingAssets();
   const mobileFits = await hero.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
   if (!mobileFits) throw new Error("mobile hero is visibly clipped");
   await shot("landing-mobile.png");
   await shot("landing-mobile-viewport.png", false);
 
-  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await open("/architecture");
   await page.getByRole("heading", { name: /Delivery is at least once/i }).waitFor();
   await shot("architecture.png");

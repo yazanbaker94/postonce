@@ -44,18 +44,27 @@ test('reviewer can complete the close and inspect evidence', async ({ page }, te
   }
 });
 
-test('landing and control room do not clip at narrow phone widths', async ({ page }, testInfo) => {
+test('landing and control room do not clip at tablet or narrow phone widths', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto('/');
+  for (const selector of ['.home-hero', '.home-flow__inner', '.home-control-plane', '.home-evidence', '.home-control-room']) {
+    expect(await page.locator(selector).evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= -1 && rect.right <= window.innerWidth + 1 && node.scrollWidth <= node.clientWidth + 1;
+    })).toBe(true);
+  }
+
   for (const width of [390, 360]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto('/');
-    const h1 = page.locator('.hero h1');
+    const h1 = page.locator('.home-hero h1');
     await expect(h1).toBeVisible();
     expect(await h1.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
-    expect(await page.locator('.hero__copy .eyebrow').evaluate((node) => {
+    expect(await page.locator('.home-header').evaluate((node) => {
       const viewport = window.innerWidth;
-      return [...node.querySelectorAll('span')].every((span) => span.getBoundingClientRect().right <= viewport);
+      return node.getBoundingClientRect().right <= viewport;
     })).toBe(true);
-    expect(await page.locator('.hero__meta').evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    expect(await page.locator('.home-state-strip').evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     if (testInfo.project.name === 'screenshots') {
       await page.screenshot({ path: `test-results/screenshots/0${width === 390 ? 6 : 7}-landing-mobile-${width}.png`, fullPage: true });

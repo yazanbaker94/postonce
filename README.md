@@ -6,6 +6,8 @@ PostOnce is an independent engineering case study for failure-safe payment posti
 
 PostOnce is not a payment processor and does not move money. It is not affiliated with, commissioned by, or connected to Anchorbase, DealerTrack, or any real dealership, bank, processor, or DMS. Every person, business, endpoint, identifier, and transaction is synthetic. No cardholder data is used.
 
+![PostOnce failure-safe payment posting case study](apps/web/public/og-preview.png)
+
 ## Review the build
 
 - Live case study: [postonce.swoop.video](https://postonce.swoop.video)
@@ -38,7 +40,7 @@ The interface explains each result in plain language and exposes the sanitized r
 | --- | --- |
 | ![Sanitized lost-response integration evidence](docs/screenshots/web/lost-response-evidence.png) | ![PostOnce architecture case study](docs/screenshots/web/architecture.png) |
 
-The captures are generated through `npm run screenshots -- <base-url>`. The script refuses to finish when it observes a browser error or a clipped mobile hero.
+The full evidence set is generated through `npm run screenshots -- <base-url>`. Landing-only desktop, mobile, and social previews are generated with `npm run screenshots:landing -- <base-url>`; both capture paths fail on browser errors or horizontal clipping.
 
 ## What this proves
 

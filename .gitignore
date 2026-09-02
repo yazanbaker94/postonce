@@ -14,3 +14,4 @@ backups/
 infra/.deploy-state/
 infra/.images.env
 docs/screenshots/**/*-local.png
+design and assets/
