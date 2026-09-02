@@ -274,7 +274,9 @@ export class PostgresDemoRepository implements DemoRepository, OnModuleDestroy {
          SET status = EXCLUDED.status, version = EXCLUDED.version, resolution = EXCLUDED.resolution`,
         [state.session.id, exception.id, exception.paymentId, exception.type, exception.severity,
           exception.status, exception.version, exception.title, exception.summary, JSON.stringify(exception.candidates),
-          exception.assistantNote, JSON.stringify(exception.resolution), exception.openedAt],
+          exception.assistantNote,
+          exception.resolution === null ? null : JSON.stringify(exception.resolution),
+          exception.openedAt],
       );
     }
 

@@ -24,6 +24,28 @@ describePostgres("PostgreSQL aggregate lock and relational constraints", () => {
       });
     }
 
+    const openException = await pool.query<{
+      status: string;
+      resolution: unknown;
+      resolution_is_sql_null: boolean;
+      constraint_state_valid: boolean;
+    }>(
+      `SELECT status,
+              resolution,
+              resolution IS NULL AS resolution_is_sql_null,
+              ((status = 'OPEN' AND resolution IS NULL)
+                OR (status = 'RESOLVED' AND resolution IS NOT NULL)) AS constraint_state_valid
+       FROM payment_exceptions
+       WHERE session_id = $1 AND id = 'exc_ambiguous_1009'`,
+      [sessionId],
+    );
+    expect(openException.rows).toEqual([{
+      status: "OPEN",
+      resolution: null,
+      resolution_is_sql_null: true,
+      constraint_state_valid: true,
+    }]);
+
     const resolve = (operationKey: string, candidateInvoiceId: string) => repository.mutate(sessionId, (state) => {
       const outcome = engine.execute(state, "resolve-exception", {
         operationKey,
@@ -43,6 +65,37 @@ describePostgres("PostgreSQL aggregate lock and relational constraints", () => {
     expect(raced.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     const rejected = raced.find((result) => result.status === "rejected");
     expect(rejected).toMatchObject({ reason: { code: "VERSION_CONFLICT", status: 409 } });
+
+    const resolvedException = await pool.query<{
+      status: string;
+      version: number;
+      resolution: {
+        acceptedAmountCents: number;
+        candidateInvoiceId: string;
+        operationKey: string;
+      };
+      resolution_type: string | null;
+      constraint_state_valid: boolean;
+    }>(
+      `SELECT status,
+              version,
+              resolution,
+              jsonb_typeof(resolution) AS resolution_type,
+              ((status = 'OPEN' AND resolution IS NULL)
+                OR (status = 'RESOLVED' AND resolution IS NOT NULL)) AS constraint_state_valid
+       FROM payment_exceptions
+       WHERE session_id = $1 AND id = 'exc_ambiguous_1009'`,
+      [sessionId],
+    );
+    expect(resolvedException.rows[0]).toMatchObject({
+      status: "RESOLVED",
+      version: 2,
+      resolution_type: "object",
+      constraint_state_valid: true,
+      resolution: { acceptedAmountCents: 49_500 },
+    });
+    expect(["inv_8031", "inv_8037"]).toContain(resolvedException.rows[0]?.resolution.candidateInvoiceId);
+    expect(["resolve_maya_pg", "resolve_jon_pg"]).toContain(resolvedException.rows[0]?.resolution.operationKey);
 
     const aggregate = await repository.get(sessionId);
     expect(aggregate?.allocations.filter((allocation) => allocation.paymentId === "pay_1009")).toHaveLength(1);
