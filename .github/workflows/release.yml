@@ -101,7 +101,7 @@ jobs:
         id: image
         shell: bash
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/postonce-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: metadata
         with:
           images: ${{ steps.image.outputs.name }}
