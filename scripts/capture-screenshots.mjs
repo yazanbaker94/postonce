@@ -1,16 +1,30 @@
 #!/usr/bin/env node
 
 import { mkdir } from "node:fs/promises";
+import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { chromium } from "@playwright/test";
 
 const rawBaseUrl = process.argv[2] ?? process.env.POSTONCE_BASE_URL ?? "http://127.0.0.1:5173";
 const baseUrl = rawBaseUrl.replace(/\/$/, "");
 const outputDir = resolve("docs/screenshots/web");
+const resolverIp = process.env.POSTONCE_RESOLVE_IP?.trim();
+const resolverIpVersion = resolverIp ? isIP(resolverIp) : 0;
+
+if (resolverIp && resolverIpVersion === 0) {
+  throw new Error("POSTONCE_RESOLVE_IP must be a valid IPv4 or IPv6 address");
+}
+
+const resolverTarget = resolverIpVersion === 6 ? `[${resolverIp}]` : resolverIp;
 
 await mkdir(outputDir, { recursive: true });
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: true,
+  args: resolverTarget
+    ? [`--host-resolver-rules=MAP ${new URL(baseUrl).hostname} ${resolverTarget}`]
+    : [],
+});
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
 const browserErrors = [];
 
