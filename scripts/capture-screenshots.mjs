@@ -48,16 +48,22 @@ async function shot(name, fullPage = true) {
 
 async function settleLandingAssets() {
   await page.evaluate(async () => {
+    const root = document.documentElement;
+    const previousScrollBehavior = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
     const step = Math.max(420, Math.floor(window.innerHeight * .72));
-    for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
+    for (let y = 0; y < root.scrollHeight; y += step) {
       window.scrollTo(0, y);
       await new Promise((done) => setTimeout(done, 80));
     }
-    window.scrollTo(0, 0);
     await Promise.all([...document.images].map(async (image) => {
       if (image.decode) await image.decode().catch(() => {});
       if (image.naturalWidth === 0) throw new Error(`Image failed to load: ${image.currentSrc || image.src}`);
     }));
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    root.style.scrollBehavior = previousScrollBehavior;
+    if (window.scrollY !== 0) throw new Error(`Landing capture did not return to the top: ${window.scrollY}`);
   });
 }
 

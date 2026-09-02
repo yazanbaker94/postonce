@@ -13,10 +13,14 @@ describe('PostOnce reviewer experience', () => {
   });
 
   it('states the product thesis and opens the guided close', async () => {
-    render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    const { container } = render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
     expect(screen.getByRole('heading', { name: /Every payment posts once/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Watch the close prove itself/i })).toBeTruthy();
     expect(screen.getAllByText(/independent engineering case study/i).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: /Run the close/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: /Explore the control room/i }).some((link) => link.getAttribute('href') === '/demo')).toBe(true);
+    expect(container.querySelector('img[src*="control-room-dashboard"]')).toBeNull();
+    expect(container.textContent).not.toMatch(/1,246|98\.72%|99\.9%/);
   });
 
   it('creates an isolated API session and advances one deterministic chapter', async () => {

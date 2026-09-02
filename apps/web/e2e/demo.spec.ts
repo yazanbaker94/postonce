@@ -45,6 +45,24 @@ test('reviewer can complete the close and inspect evidence', async ({ page }, te
 });
 
 test('landing and control room do not clip at tablet or narrow phone widths', async ({ page }, testInfo) => {
+  for (const width of [1080, 901]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    const heroComposition = await page.locator('.home-hero').evaluate((hero) => {
+      const copy = hero.querySelector<HTMLElement>('.home-hero__copy')!.getBoundingClientRect();
+      const art = hero.querySelector<HTMLElement>('.home-hero__art')!.getBoundingClientRect();
+      const image = hero.querySelector<HTMLImageElement>('.home-hero__art img')!.getBoundingClientRect();
+      return { copyBottom: copy.bottom, artTop: art.top, artHeight: art.height, imageWidth: image.width };
+    });
+    expect(heroComposition.artTop).toBeGreaterThanOrEqual(heroComposition.copyBottom - 1);
+    expect(heroComposition.artHeight).toBeGreaterThanOrEqual(580);
+    expect(heroComposition.imageWidth).toBeGreaterThanOrEqual(width * .75);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    if (testInfo.project.name === 'screenshots') {
+      await page.screenshot({ path: `test-results/screenshots/landing-tablet-${width}.png`, fullPage: true });
+    }
+  }
+
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.goto('/');
   for (const selector of ['.home-hero', '.home-flow__inner', '.home-control-plane', '.home-evidence', '.home-control-room']) {

@@ -69,7 +69,7 @@ export function Landing() {
         <section className="home-hero" aria-labelledby="home-hero-title">
           <div className="home-hero__copy">
             <p className="home-kicker">Failure-safe financial operations</p>
-            <h1 id="home-hero-title">Every payment<br />posts once.<br /><em>Every exception</em><br /><em>stays explainable.</em></h1>
+            <h1 id="home-hero-title"><span>Every payment</span><br /><span>posts once.</span><br /><em>Every exception</em><br /><em>stays explainable.</em></h1>
             <p className="home-hero__lede">PostOnce proves what happens between payment approval and books reconciled—including duplicates, retries, ambiguous allocations, and lost responses.</p>
             <div className="home-actions">
               <Link to="/demo" className="home-button home-button--primary">Run the close <span aria-hidden="true">→</span></Link>
@@ -83,7 +83,7 @@ export function Landing() {
             <img
               src="/assets/home/hero-switchyard-1254.webp"
               srcSet="/assets/home/hero-switchyard-640.webp 640w, /assets/home/hero-switchyard-960.webp 960w, /assets/home/hero-switchyard-1254.webp 1254w"
-              sizes="(max-width: 760px) 560px, (max-width: 900px) 780px, (max-width: 1600px) 55vw, 780px"
+              sizes="(max-width: 760px) 640px, (max-width: 1080px) 900px, (max-width: 1600px) 72vw, 1040px"
               alt="A physical routing model showing payment records entering PostOnce and leaving as evidence, exceptions, or review decisions"
               width="1254"
               height="1254"
@@ -114,7 +114,7 @@ export function Landing() {
               <img
                 src="/assets/home/process-flow-dark-1672.webp"
                 srcSet="/assets/home/process-flow-dark-768.webp 768w, /assets/home/process-flow-dark-1280.webp 1280w, /assets/home/process-flow-dark-1672.webp 1672w"
-                sizes="(max-width: 760px) 720px, (max-width: 900px) calc(100vw - 96px), (max-width: 1600px) 66vw, 1050px"
+                sizes="(max-width: 760px) 720px, (max-width: 900px) calc(100vw - 96px), (max-width: 1600px) 75vw, 1080px"
                 alt="Five-stage PostOnce flow from intake through proof, with failures rerouted to recovery and escalation"
                 width="1672"
                 height="941"
@@ -136,7 +136,7 @@ export function Landing() {
             <img
               src="/assets/home/control-plane-routing-1672.webp"
               srcSet="/assets/home/control-plane-routing-768.webp 768w, /assets/home/control-plane-routing-1280.webp 1280w, /assets/home/control-plane-routing-1672.webp 1672w"
-              sizes="(max-width: 760px) calc(100vw - 44px), (max-width: 900px) calc(100vw - 96px), (max-width: 1600px) 65vw, 1040px"
+              sizes="(max-width: 760px) calc(116vw - 44px), (max-width: 900px) calc(100vw - 96px), (max-width: 1600px) 76vw, 1080px"
               alt="PostOnce control plane routing API, bank, gateway, and file inputs into posted, pending, and exception outcomes"
               width="1672"
               height="941"
@@ -172,22 +172,13 @@ export function Landing() {
         <section className="home-control-room" aria-labelledby="home-control-room-title">
           <div className="home-control-room__copy">
             <p className="home-kicker">Close with confidence</p>
-            <h2 id="home-control-room-title">Operate from one<br />control room.</h2>
-            <p>See what is flowing, what has settled, and what needs your attention. Resolve the close with clarity—not heroics.</p>
+            <h2 id="home-control-room-title">Watch the close<br />prove itself.</h2>
+            <p>Follow the Friday close from payment arrival through failure, recovery, evidence, and settlement.</p>
             <Link to="/demo" className="home-inline-link">Explore the control room <span aria-hidden="true">→</span></Link>
           </div>
-          <Link to="/demo" className="home-control-room__preview" aria-label="Open the interactive PostOnce control room">
-            <img
-              src="/assets/home/control-room-dashboard-1448.webp"
-              srcSet="/assets/home/control-room-dashboard-640.webp 640w, /assets/home/control-room-dashboard-960.webp 960w, /assets/home/control-room-dashboard-1448.webp 1448w"
-              sizes="(max-width: 760px) calc(100vw - 44px), (max-width: 900px) calc(100vw - 96px), (max-width: 1600px) 68vw, 1080px"
-              alt="PostOnce control room preview with flow monitoring, exception totals, and bank reconciliation"
-              width="1448"
-              height="1086"
-              loading="lazy"
-              decoding="async"
-            />
-          </Link>
+          <div className="home-control-room__placeholder" aria-hidden="true">
+            <span className="home-control-room__placeholder-mark" />
+          </div>
         </section>
 
         <section className="home-final-cta" aria-labelledby="home-final-title">
