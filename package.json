@@ -1,0 +1,28 @@
+{
+  "name": "postonce",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Failure-safe payment posting and reconciliation engineering demo.",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  },
+  "scripts": {
+    "dev:web": "npm run dev --workspace @postonce/web",
+    "dev:api": "npm run start:dev --workspace @postonce/api",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "smoke": "node scripts/smoke.mjs",
+    "screenshots": "node scripts/capture-screenshots.mjs",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "verify": "npm run check && npm run test:e2e --workspace @postonce/web"
+  }
+}

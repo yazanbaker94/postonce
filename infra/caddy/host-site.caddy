@@ -1,0 +1,19 @@
+# POSTONCE_HOST_SITE_V1
+postonce.swoop.video {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	reverse_proxy 127.0.0.1:18044 {
+		# Mint the admission identity from the actual TCP peer. This overwrites
+		# any value a public caller supplied before the request reaches PostOnce.
+		header_up X-PostOnce-Ingress-Peer {http.request.remote.host}
+		header_up -CF-Connecting-IP
+		header_up -Forwarded
+		header_up -True-Client-IP
+		header_up -X-Real-IP
+		header_up -X-Forwarded-For
+		health_uri /healthz
+		health_interval 20s
+		health_timeout 5s
+	}
+}

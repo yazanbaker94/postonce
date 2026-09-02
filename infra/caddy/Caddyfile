@@ -1,0 +1,61 @@
+{
+	admin off
+}
+
+:8080 {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format json
+	}
+
+	request_body {
+		max_size 64KB
+	}
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+		-Server
+	}
+
+	handle /healthz {
+		header Cache-Control "no-store"
+		respond 200
+	}
+
+	handle /api/* {
+		header Cache-Control "no-store"
+		reverse_proxy api:3001 {
+			# Only the host Caddy can reach this loopback-bound gateway. Preserve
+			# its overwritten peer identity and remove public client-IP aliases.
+			header_up X-PostOnce-Ingress-Peer {http.request.header.X-PostOnce-Ingress-Peer}
+			header_up -CF-Connecting-IP
+			header_up -Forwarded
+			header_up -True-Client-IP
+			header_up -X-Real-IP
+			header_up -X-Forwarded-For
+		}
+	}
+
+	handle /health {
+		header Cache-Control "no-store"
+		reverse_proxy api:3001
+	}
+
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	@entry path / /index.html
+	header @entry Cache-Control "no-cache"
+
+	handle {
+		root * /srv/postonce-web
+		try_files {path} /index.html
+		file_server
+	}
+}

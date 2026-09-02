@@ -1,0 +1,126 @@
+name: postonce
+
+x-postonce-logging: &postonce-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:17.11-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-postonce}
+      POSTGRES_USER: ${POSTGRES_USER:-postonce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the protected environment file}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cpus: "0.20"
+    mem_limit: 256m
+    pids_limit: 128
+    logging: *postonce-logging
+
+  api:
+    image: ${POSTONCE_API_IMAGE:?Set POSTONCE_API_IMAGE to an immutable GHCR digest}
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in the protected environment file}
+      DEMO_STORE: postgres
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://postonce.swoop.video}
+      DB_POOL_MAX: ${DB_POOL_MAX:-5}
+      DEMO_MAX_ACTIVE_SESSIONS: ${DEMO_MAX_ACTIVE_SESSIONS:-500}
+      DEMO_SESSION_TTL_MINUTES: ${DEMO_SESSION_TTL_MINUTES:-240}
+      DEMO_SESSION_CREATE_LIMIT: ${DEMO_SESSION_CREATE_LIMIT:-12}
+      DEMO_SESSION_CREATE_WINDOW_SECONDS: ${DEMO_SESSION_CREATE_WINDOW_SECONDS:-600}
+      DEMO_SESSION_MUTATION_LIMIT: ${DEMO_SESSION_MUTATION_LIMIT:-120}
+      DEMO_SESSION_MUTATION_WINDOW_SECONDS: ${DEMO_SESSION_MUTATION_WINDOW_SECONDS:-600}
+      DEMO_RATE_LIMIT_TRACKED_KEYS: ${DEMO_RATE_LIMIT_TRACKED_KEYS:-4096}
+      NODE_OPTIONS: --max-old-space-size=160
+    expose:
+      - "3001"
+    networks:
+      - edge
+      - data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3001/api/health')
+          .then(async response => {
+            const body = await response.json();
+            if (!response.ok || body.status !== 'ok') process.exit(1);
+          })
+          .catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "0.35"
+    mem_limit: 256m
+    pids_limit: 128
+    stop_grace_period: 20s
+    logging: *postonce-logging
+
+  gateway:
+    image: ${POSTONCE_GATEWAY_IMAGE:?Set POSTONCE_GATEWAY_IMAGE to an immutable GHCR digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POSTONCE_ORIGIN_PORT:-18044}:8080"
+    networks:
+      - edge
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /data:size=32m,mode=1777
+      - /config:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "0.10"
+    mem_limit: 64m
+    pids_limit: 48
+    logging: *postonce-logging
+
+networks:
+  edge:
+  data:
+    internal: true
+
+volumes:
+  postgres_data:
