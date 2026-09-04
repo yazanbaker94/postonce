@@ -397,13 +397,13 @@ export function ClosePage() {
                   <div className={`po-close-step ${close.verifiedPostingCount === close.paymentCount ? 'po-close-step--complete' : 'po-close-step--attention'}`}><span className="po-step-icon">{close.verifiedPostingCount === close.paymentCount ? <Icon name="check" /> : '!'}</span><div><strong>{close.verifiedPostingCount}</strong><p>{close.verifiedPostingCount === close.paymentCount ? 'Verified' : 'Need review'}</p></div></div>
                   <div className={`po-close-step ${exceptions.length ? 'po-close-step--attention' : 'po-close-step--complete'}`}><span className="po-step-icon">{exceptions.length || <Icon name="check" />}</span><div><strong>{exceptions.length || 'None'}</strong><p>{exceptions.length ? 'Blocking' : 'Open work'}</p></div></div>
                   <div className="po-close-step po-close-step--settlement"><span className="po-step-icon"><Icon name={payout.status === 'RECONCILED' ? 'check' : 'clock'} /></span><div><strong>{sentenceCase(payout.status)}</strong><p>Independent</p></div></div>
-                  <div className="po-close-action">
+                  <div className={`po-close-action${close.status === 'CLOSED' ? ' po-close-action--closed' : ''}`}>
                     {close.status === 'CLOSED' && close.attestation ? (
                       <div className="po-attestation" data-close-attestation={rooftop.id} tabIndex={-1}><Icon name="check" /><strong>Closed by {close.closedBy}</strong><small>{localTime(close.closedAt!, true)}</small></div>
                     ) : close.status === 'BLOCKED' ? (
-                      <Link className="po-close-endpoint po-close-endpoint--blocked" aria-label={`${close.blockingExceptionCount} blockers`} to={`/app/exceptions?location=${rooftop.code}&status=OPEN&sort=newest`}><i /><span><strong>Blocked</strong><small>{close.blockingExceptionCount} items</small></span><Icon name="chevron" /></Link>
+                      <Link className="po-close-endpoint po-close-endpoint--blocked" aria-label={`${close.blockingExceptionCount} blockers`} to={`/app/exceptions?location=${rooftop.code}&status=OPEN&sort=newest`}><i /><span><strong>Blocked</strong></span><Icon name="chevron" /></Link>
                     ) : (
-                      <button className="po-close-endpoint" aria-label="Close location" onClick={() => setConfirming(rooftop.id)}><i /><span><strong>Ready</strong><small>Close location</small></span><Icon name="chevron" /></button>
+                      <button className="po-close-endpoint" aria-label="Close location" onClick={() => setConfirming(rooftop.id)}><i /><span><strong>Ready</strong></span><Icon name="chevron" /></button>
                     )}
                   </div>
                 </article>
@@ -427,12 +427,6 @@ export function ClosePage() {
 
 function exceptionAge(state: WorkspaceState, exception: DemoException): number {
   return Math.max(0, Math.round((Date.parse(state.metadata.workspaceAsOf) - Date.parse(exception.openedAt)) / 60_000));
-}
-
-function exceptionActionLabel(exception: DemoException): string {
-  if (exception.type === 'UNMATCHED_REFUND') return 'Link original payment';
-  if (exception.type === 'SPLIT_ALLOCATION') return 'Complete split tender';
-  return 'Choose a record';
 }
 
 export function ExceptionsPage() {
@@ -486,7 +480,7 @@ export function ExceptionsPage() {
                   <div className="po-work-slip__amount"><Money cents={payment.kind === 'REFUND' ? -payment.amountCents : payment.amountCents} signed={payment.kind === 'REFUND'} /><strong>{payment.customerLabel}</strong><small>{payment.id} · {payment.methodType} •••• {payment.cardLast4}</small></div>
                   <div className="po-work-slip__body"><h2>{exception.title}</h2><p>{exception.summary}</p></div>
                   <div className="po-work-slip__age"><Icon name="clock" /><strong>{exceptionAge(state, exception)} min ago</strong></div>
-                  <div className="po-work-slip__review"><span>Review</span><Icon name="arrow" /><small>{exceptionActionLabel(exception)}</small></div>
+                  <div className="po-work-slip__review"><span>Review</span><Icon name="arrow" /></div>
                 </Link>
               );
             })}
