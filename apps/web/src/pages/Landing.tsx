@@ -30,7 +30,7 @@ function BrandLogo({ inverse = false }: { inverse?: boolean }) {
 function MarketingHeader() {
   return (
     <header className="home-header">
-      <Link to="/" className="home-header__brand" aria-label="PostOnce home"><BrandLogo /></Link>
+      <Link to="/case-study" className="home-header__brand" aria-label="PostOnce case study"><BrandLogo /></Link>
       <nav className="home-nav" aria-label="Primary navigation">
         <a href="#how-it-works">Platform</a>
         <a href="#how-it-works">How it works</a>

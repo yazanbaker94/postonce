@@ -28,9 +28,9 @@ export function Status({ children, tone = 'neutral' }: { children: ReactNode; to
 export function SiteHeader() {
   return (
     <header className="site-header">
-      <Link to="/" className="site-header__brand"><Mark /></Link>
+      <Link to="/case-study" className="site-header__brand"><Mark /></Link>
       <nav className="site-nav" aria-label="Primary navigation">
-        <NavLink to="/" end>Case study</NavLink>
+        <NavLink to="/case-study" end>Case study</NavLink>
         <NavLink to="/architecture">Architecture</NavLink>
         <Link to="/app/close" className="button button--small button--ink">Open workspace <Arrow /></Link>
       </nav>

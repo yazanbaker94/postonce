@@ -222,7 +222,7 @@ function ProductShell() {
               <strong>Northline Motor Group</strong>
               <p>Isolated synthetic workspace</p>
               <button onClick={() => { setProfileOpen(false); void reset(); }} disabled={status !== 'ready' || Boolean(pendingLabel)}><Icon name="reset" /> Reset workspace</button>
-              <Link to="/" onClick={() => setProfileOpen(false)}>View case study</Link>
+              <Link to="/case-study" onClick={() => setProfileOpen(false)}>View case study</Link>
             </div>
           )}
         </div>

@@ -19,7 +19,8 @@ import {
 export function App() {
   return (
     <Routes>
-      <Route path="/" element={<Landing />} />
+      <Route path="/" element={<Navigate to="/app/close" replace />} />
+      <Route path="/case-study" element={<Landing />} />
       <Route path="/architecture" element={<Architecture />} />
       <Route path="/demo" element={<Navigate to="/app/close" replace />} />
       <Route path="/app" element={<ProductApp />}>
@@ -35,7 +36,7 @@ export function App() {
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="*" element={<ProductNotFound />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/app/close" replace />} />
     </Routes>
   );
 }
