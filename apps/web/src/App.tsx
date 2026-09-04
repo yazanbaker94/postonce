@@ -1,6 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Architecture } from './pages/Architecture';
-import { Landing } from './pages/Landing';
 import {
   ActivityPage,
   ClosePage,
@@ -20,7 +19,6 @@ export function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/app/close" replace />} />
-      <Route path="/case-study" element={<Landing />} />
       <Route path="/architecture" element={<Architecture />} />
       <Route path="/demo" element={<Navigate to="/app/close" replace />} />
       <Route path="/app" element={<ProductApp />}>

@@ -50,26 +50,6 @@ async function webShot(name, fullPage = true) {
   await page.screenshot({ path: resolve(webOutputDir, name), fullPage });
 }
 
-async function settleLandingAssets() {
-  await page.evaluate(async () => {
-    const root = document.documentElement;
-    const previousScrollBehavior = root.style.scrollBehavior;
-    root.style.scrollBehavior = "auto";
-    const step = Math.max(420, Math.floor(window.innerHeight * 0.72));
-    for (let y = 0; y < root.scrollHeight; y += step) {
-      window.scrollTo(0, y);
-      await new Promise((done) => setTimeout(done, 80));
-    }
-    await Promise.all([...document.images].map(async (image) => {
-      if (image.decode) await image.decode().catch(() => {});
-      if (image.naturalWidth === 0) throw new Error(`Image failed to load: ${image.currentSrc || image.src}`);
-    }));
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-    root.style.scrollBehavior = previousScrollBehavior;
-  });
-}
-
 async function resolveException(id, heading, buttonName) {
   await page.getByRole("link", { name: "Exceptions" }).first().click();
   await page.locator(".po-work-slip").filter({ hasText: id }).click();
@@ -79,23 +59,16 @@ async function resolveException(id, heading, buttonName) {
 }
 
 try {
-  await open("/case-study");
-  await page.getByRole("heading", { name: /Every payment posts once/i }).waitFor();
-  await settleLandingAssets();
-  await webShot("landing.png");
-
-  await page.evaluate(() => window.localStorage.clear());
   await open("/app/close");
-  await page.getByRole("heading", { name: "Daily close" }).waitFor({ timeout: 15_000 });
+  await page.getByRole("heading", { name: "Friday Close" }).waitFor({ timeout: 15_000 });
   await productShot("01-close-initial.png");
 
-  const ford = page.locator(".po-close-rail").filter({ hasText: "Northline Ford" });
-  await ford.getByRole("link", { name: /Review exceptions/i }).click();
-  await page.getByRole("heading", { name: "Open work" }).waitFor();
+  await open("/app/exceptions?location=NLF&status=OPEN&sort=newest");
+  await page.getByRole("heading", { name: "Northline Ford" }).waitFor();
   await productShot("02-ford-exceptions.png");
 
-  await page.locator(".po-work-slip").filter({ hasText: "EX-104" }).click();
-  await page.getByRole("heading", { name: "Ambiguous payment match" }).waitFor();
+  await open("/app/exceptions/EX-104");
+  await page.locator(".po-decision-heading h2").filter({ hasText: "Ambiguous payment match" }).waitFor();
   await productShot("03-ex104-decision-bench.png");
   await page.getByRole("button", { name: /Apply \$1,125\.00 to RO-8004/i }).click();
   await page.getByText("Dealership-system write verified").waitFor();
@@ -111,7 +84,7 @@ try {
   await readyFord.getByText("Closed by Maya Chen").waitFor();
 
   await page.locator(".po-prior-settlement-row").click();
-  await page.getByRole("heading", { name: "PAYOUT-9842" }).waitFor();
+  await page.getByRole("heading", { name: "Daily deposit reconciliation" }).waitFor();
   await page.evaluate(async () => {
     const root = document.documentElement;
     const previous = root.style.scrollBehavior;
@@ -125,34 +98,18 @@ try {
   await page.getByRole("heading", { name: "Deposit reconciled" }).waitFor();
 
   await open("/app/payments/PAY-1017");
-  await page.getByRole("heading", { name: "Riley Chen" }).waitFor();
+  await page.locator(".po-payment-heading h1").waitFor();
   await page.locator("summary").filter({ hasText: "Evidence · response recovery" }).click();
   await page.getByText("One effect, proven across two attempts").waitFor();
-  await page.locator(".po-state-ribbon").evaluate(async (element) => {
-    const top = element.getBoundingClientRect().top + window.scrollY;
-    const root = document.documentElement;
-    const previous = root.style.scrollBehavior;
-    root.style.scrollBehavior = "auto";
-    window.scrollTo(0, Math.max(0, top - 74));
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    root.style.scrollBehavior = previous;
-  });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await productShot("04-pay1017-evidence.png");
 
   await page.locator(".po-profile").click();
-  await page.getByRole("button", { name: "Reset workspace" }).click();
+  await page.getByRole("button", { name: "Reset workspace" }).first().click();
   await page.setViewportSize({ width: 390, height: 844 });
   await open("/app/close");
-  await page.getByRole("heading", { name: "Daily close" }).waitFor();
+  await page.getByRole("heading", { name: "Friday Close" }).waitFor();
   await productShot("mobile-close.png");
-
-  await open("/case-study");
-  await page.getByRole("heading", { name: /Every payment posts once/i }).waitFor();
-  await settleLandingAssets();
-  const mobileFits = await page.locator(".home-hero h1").evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
-  if (!mobileFits) throw new Error("mobile hero is visibly clipped");
-  await webShot("landing-mobile.png");
-  await webShot("landing-mobile-viewport.png", false);
 
   await page.setViewportSize({ width: 1536, height: 1024 });
   await open("/architecture");

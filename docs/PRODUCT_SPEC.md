@@ -90,7 +90,6 @@ The −$25.00 network assessment is supported by an immutable source record. Rec
 | Route | Purpose |
 | --- | --- |
 | `/` | Primary public entry; resolves directly to the daily-close workspace. |
-| `/case-study` | Secondary project presentation and engineering narrative. |
 | `/app/close` | Per-location operational readiness and close attestation. |
 | `/app/exceptions` | Filtered queue of decisions requiring controller judgment. |
 | `/app/exceptions/:id` | Source payment, candidate evidence, and guarded resolution. |
