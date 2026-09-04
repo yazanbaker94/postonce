@@ -10,11 +10,11 @@ This repository contains a synthetic evaluation product, not a payment processor
 
 ## Open the product
 
-- Product workspace: [postonce.swoop.video/app/close](https://postonce.swoop.video/app/close)
-- Product overview: [postonce.swoop.video](https://postonce.swoop.video)
+- Product: [postonce.swoop.video](https://postonce.swoop.video)
+- Case study: [postonce.swoop.video/case-study](https://postonce.swoop.video/case-study)
 - Architecture: [postonce.swoop.video/architecture](https://postonce.swoop.video/architecture)
 
-`/demo` is retained only as a compatibility redirect. `/app/close` is the canonical product entry.
+The root URL opens the product workspace and resolves to `/app/close`. `/case-study` preserves the project presentation, while `/demo` remains only as a compatibility redirect.
 
 The browser creates an isolated synthetic workspace and keeps its identifier in local storage. A workspace-service failure leaves financial actions unavailable and visibly reports the problem; browser-only state is never presented as persisted evidence.
 

@@ -1,5 +1,9 @@
 # Architecture and product decisions
 
+## Product-first public entry
+
+The primary origin is the product's front door, so `/` resolves directly to `/app/close` and opens the operational workspace. The explanatory presentation remains available at `/case-study`, and the architecture evidence remains at `/architecture`. This resolves the earlier handoff tension between preserving a marketing root and requiring first-time visitors to land directly on Close in favor of the working product experience.
+
 ## Exception-first operator experience
 
 Routine matching and recovery are system work, so the product opens on per-location close readiness and sends Maya only the items that need judgment. Duplicate delivery, safe retry, and other engineering behavior remain available as contextual evidence instead of operator-facing simulation controls.

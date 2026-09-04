@@ -46,8 +46,17 @@ describe('PostOnce product experience', () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-  it('keeps the case-study entry and routes every close CTA into the product', () => {
+  it('makes the product workspace the primary entry', async () => {
+    const state = workspaceFixture();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ sessionId, sessionHeader: 'X-Demo-Session', state }), { status: 201 })));
     render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+
+    expect(await screen.findByRole('heading', { name: 'Daily close' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: /Every payment posts once/i })).toBeNull();
+  });
+
+  it('keeps the case study available as a secondary route', () => {
+    render(<MemoryRouter initialEntries={['/case-study']}><App /></MemoryRouter>);
     expect(screen.getByRole('heading', { name: /Every payment posts once/i })).toBeTruthy();
     const closeLinks = screen.getAllByRole('link', { name: /Run the close/i });
     expect(closeLinks.length).toBeGreaterThan(0);

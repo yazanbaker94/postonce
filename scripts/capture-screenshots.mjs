@@ -79,7 +79,7 @@ async function resolveException(id, heading, buttonName) {
 }
 
 try {
-  await open("/");
+  await open("/case-study");
   await page.getByRole("heading", { name: /Every payment posts once/i }).waitFor();
   await settleLandingAssets();
   await webShot("landing.png");
@@ -146,7 +146,7 @@ try {
   await page.getByRole("heading", { name: "Daily close" }).waitFor();
   await productShot("mobile-close.png");
 
-  await open("/");
+  await open("/case-study");
   await page.getByRole("heading", { name: /Every payment posts once/i }).waitFor();
   await settleLandingAssets();
   const mobileFits = await page.locator(".home-hero h1").evaluate((element) => element.scrollWidth <= element.clientWidth + 1);

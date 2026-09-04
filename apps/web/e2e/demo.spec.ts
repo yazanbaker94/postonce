@@ -16,12 +16,13 @@ async function assertNoPageOverflow(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/case-study');
   await page.evaluate(() => window.localStorage.clear());
 });
 
 test('controller completes the canonical close and reconciliation journey', async ({ page }, testInfo) => {
-  await page.goto('/app/close');
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/app\/close$/);
   await expect(page.getByRole('heading', { name: 'Daily close' })).toBeVisible();
   await expect(page.getByText(/2 locations ready · 1 blocked .* 3 open operational exceptions/i)).toBeVisible();
   const fordRail = page.locator('.po-close-rail').filter({ hasText: 'Northline Ford' });
@@ -178,9 +179,9 @@ test('controller completes the canonical close and reconciliation journey', asyn
   await assertNoPageOverflow(page);
 });
 
-test('landing geometry and product shell remain usable at narrow widths', async ({ page }, testInfo) => {
+test('case-study geometry and product shell remain usable at narrow widths', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto('/');
+  await page.goto('/case-study');
   await expect(page.getByRole('heading', { name: /Every payment posts once/i })).toBeVisible();
   const measuredSections = await page.locator('body').evaluate(() => {
     const selectors = ['.home-header', '.home-hero', '.home-state-strip', '.home-flow', '.home-control-plane', '.home-evidence', '.home-control-room', '.home-final-cta', '.home-footer'];
@@ -210,7 +211,7 @@ test('landing geometry and product shell remain usable at narrow widths', async 
 
   for (const width of [390, 360]) {
     await page.setViewportSize({ width, height: 844 });
-    await page.goto('/');
+    await page.goto('/case-study');
     await expect(page.locator('.home-hero h1')).toBeVisible();
     await assertNoPageOverflow(page);
     if (testInfo.project.name === 'screenshots' && width === 390) await page.screenshot({ path: resolve(screenshotDir, 'landing-mobile-viewport.png') });

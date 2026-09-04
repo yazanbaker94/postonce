@@ -24,8 +24,8 @@ page.on('requestfailed', (request) => {
 });
 
 async function openLanding() {
-  const response = await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
-  if (!response?.ok()) throw new Error(`Landing page returned ${response?.status() ?? 'no response'}`);
+  const response = await page.goto(`${baseUrl}/case-study`, { waitUntil: 'networkidle' });
+  if (!response?.ok()) throw new Error(`Case-study page returned ${response?.status() ?? 'no response'}`);
   await page.getByRole('heading', { name: /Every payment posts once/i }).waitFor();
   await page.evaluate(async () => {
     await document.fonts.ready;
@@ -66,27 +66,14 @@ try {
   await page.screenshot({ path: resolve(outputDir, 'landing-mobile-viewport.png') });
 
   await page.setViewportSize({ width: 1200, height: 630 });
-  await openLanding();
-  await page.addStyleTag({ content: `
-    .home-header { height: 80px !important; padding-inline: 64px !important; }
-    .home-brand__crop { width: 180px !important; height: 44px !important; }
-    .home-brand__crop img { width: 180px !important; }
-    .home-nav { gap: 28px !important; font-size: 12px !important; }
-    .home-button--nav { min-height: 44px !important; }
-    .home-hero { display: grid !important; height: 550px !important; min-height: 550px !important; grid-template-columns: .4fr .6fr !important; }
-    .home-hero__copy { position: relative !important; inset: auto !important; width: auto !important; padding: 48px 0 42px 64px !important; }
-    .home-hero h1 { font-size: 58px !important; }
-    .home-hero__lede { max-width: 440px !important; margin-top: 20px !important; font-size: 14px !important; line-height: 1.45 !important; }
-    .home-actions { margin-top: 22px !important; }
-    .home-button { min-height: 42px !important; }
-    .home-hero__note { display: none !important; }
-    .home-hero__art { position: relative !important; inset: auto !important; width: auto !important; height: auto !important; }
-    .home-hero__art img { top: -17% !important; right: -12% !important; left: auto !important; width: 850px !important; }
-  ` });
+  await page.evaluate(() => window.localStorage.clear());
+  const rootResponse = await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+  if (!rootResponse?.ok()) throw new Error(`Product root returned ${rootResponse?.status() ?? 'no response'}`);
+  await page.getByRole('heading', { name: 'Daily close' }).waitFor();
   await page.screenshot({ path: ogPreview });
 
   if (browserErrors.length > 0) throw new Error(`Browser errors observed:\n${browserErrors.join('\n')}`);
-  process.stdout.write(`Captured PostOnce landing evidence from ${baseUrl}\n`);
+  process.stdout.write(`Captured PostOnce case-study evidence from ${baseUrl}\n`);
 } finally {
   await browser.close();
 }

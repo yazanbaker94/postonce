@@ -183,10 +183,10 @@ try {
     throw 'The PostOnce release did not become healthy.'
   }
 
-  $landingResponse = Invoke-PublicCheck -Uri 'https://postonce.swoop.video/' -Attempts 12
+  $rootResponse = Invoke-PublicCheck -Uri 'https://postonce.swoop.video/' -Attempts 12
   $gatewayHealthResponse = Invoke-PublicCheck -Uri 'https://postonce.swoop.video/healthz' -Attempts 3
   $apiHealthResponse = Invoke-PublicCheck -Uri 'https://postonce.swoop.video/api/health' -Attempts 3
-  $cloudflareServer = ($landingResponse.Headers['Server'] -join ',')
+  $cloudflareServer = ($rootResponse.Headers['Server'] -join ',')
   if ($cloudflareServer -notmatch '(?i)cloudflare') {
     throw 'PostOnce is reachable, but the public response did not traverse the expected Cloudflare proxy.'
   }
