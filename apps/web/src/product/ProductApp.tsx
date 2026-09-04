@@ -20,8 +20,9 @@ import type { DemoException, ProcessorPayout, WorkspaceState } from '@postonce/c
 import { searchWorkspace } from './api';
 import { useWorkspace, WorkspaceProvider } from './WorkspaceProvider';
 import './product.css';
+import './reference.css';
 
-type IconName = 'close' | 'exception' | 'payment' | 'deposit' | 'activity' | 'integration' | 'search' | 'chevron' | 'check' | 'clock' | 'reset' | 'menu' | 'arrow';
+type IconName = 'close' | 'exception' | 'payment' | 'deposit' | 'activity' | 'integration' | 'search' | 'chevron' | 'check' | 'clock' | 'reset' | 'menu' | 'arrow' | 'calendar' | 'location' | 'document' | 'external' | 'adjust';
 
 function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {
   const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -39,6 +40,11 @@ function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) 
     reset: <><path d="M4 8V3.5L7.5 7M5.4 7A8 8 0 1 1 4 14" /></>,
     menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
     arrow: <><path d="M4 12h15M14 7l5 5-5 5" /></>,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18" /></>,
+    location: <><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></>,
+    document: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></>,
+    external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v7H4V6h7" /></>,
+    adjust: <><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true" {...common} {...props}>{paths[name]}</svg>;
 }
@@ -46,13 +52,25 @@ function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) 
 function Brand() {
   return (
     <span className="po-brand" aria-label="PostOnce">
-      <span className="po-brand__mark" aria-hidden="true"><b>P</b><i>/</i><b>1</b></span>
-      <span>POST<b>ONCE</b></span>
+      <svg className="po-brand__mark" viewBox="0 0 28 32" aria-hidden="true">
+        <path fill="#1260e8" d="M14 1 26 8v15L14 31 2 24V8Z" />
+        <path fill="#0b4bc0" d="m14 16 12-8v15l-12 8Z" />
+        <path fill="#2879f2" d="M2 8 14 1l12 7-12 8Z" />
+        <path fill="#1688ff" d="m2 8 12 8v15L2 24Z" />
+      </svg>
+      <span>PostOnce</span>
     </span>
   );
 }
 
 const moneyFormatter = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', currencyDisplay: 'narrowSymbol' });
+const businessDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'UTC',
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
 
 function formatMoney(cents: number, signed = false): string {
   const prefix = signed && cents < 0 ? '−' : signed && cents > 0 ? '+' : '';
@@ -62,6 +80,10 @@ function formatMoney(cents: number, signed = false): string {
 function Money({ cents, signed = false }: { cents: number; signed?: boolean }) {
   const text = formatMoney(cents, signed);
   return <span className="po-money" aria-label={`${cents < 0 ? 'negative ' : ''}${Math.abs(cents / 100).toFixed(2)} Canadian dollars`}>{text}</span>;
+}
+
+function businessDateLabel(value: string): string {
+  return businessDateFormatter.format(new Date(`${value}T12:00:00Z`));
 }
 
 function localTime(value: string, includeDate = false): string {
@@ -195,7 +217,6 @@ function ProductShell() {
       <a className="po-skip" href="#workspace-content">Skip to workspace content</a>
       <aside className="po-sidebar">
         <Link to="/app/close" className="po-sidebar__brand"><Brand /></Link>
-        <div className="po-workspace-label"><small>Workspace</small><strong>Northline Motor Group</strong></div>
         <nav aria-label="Workspace navigation">
           {navigation.map((item) => (
             <NavLink key={item.to} to={item.to} className={({ isActive }) => isActive ? 'active' : undefined}>
@@ -205,27 +226,28 @@ function ProductShell() {
           ))}
         </nav>
         <div className="po-sidebar__footer">
-          <span><i /> Synthetic workspace</span>
-          <small>No real payment data</small>
+          <div className="po-sidebar__organization">Northline Motor Group</div>
+          <div className="po-profile-wrap po-profile-wrap--sidebar">
+            <button className="po-profile" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen}>
+              <span>MC</span><span><strong>{state?.user.name ?? 'Maya Chen'}</strong><small>{state?.user.roleLabel ?? 'Group Controller'}</small></span>
+            </button>
+            {profileOpen && (
+              <div className="po-profile-menu">
+                <strong>Northline Motor Group</strong>
+                <p>Isolated synthetic workspace</p>
+                <button onClick={() => { setProfileOpen(false); void reset(); }} disabled={status !== 'ready' || Boolean(pendingLabel)}><Icon name="reset" /> Reset workspace</button>
+              </div>
+            )}
+          </div>
+          <button type="button" className="po-sidebar__reset" onClick={() => void reset()} disabled={status !== 'ready' || Boolean(pendingLabel)}><Icon name="reset" /> Reset workspace</button>
+          <small className="po-sidebar__scope">Synthetic data only</small>
         </div>
       </aside>
 
       <header className="po-topbar">
         <GlobalSearch />
-        <div className="po-topbar__date"><Icon name="clock" /><span><strong>Friday, Sep 4</strong><small>4:55 PM · MT</small></span></div>
-        <div className="po-profile-wrap">
-          <button className="po-profile" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen}>
-            <span>MC</span><span><strong>{state?.user.name ?? 'Maya Chen'}</strong><small>Group Controller</small></span><Icon name="chevron" />
-          </button>
-          {profileOpen && (
-            <div className="po-profile-menu">
-              <strong>Northline Motor Group</strong>
-              <p>Isolated synthetic workspace</p>
-              <button onClick={() => { setProfileOpen(false); void reset(); }} disabled={status !== 'ready' || Boolean(pendingLabel)}><Icon name="reset" /> Reset workspace</button>
-              <Link to="/case-study" onClick={() => setProfileOpen(false)}>View case study</Link>
-            </div>
-          )}
-        </div>
+        <div className="po-topbar__organization">Northline Motor Group</div>
+        <div className="po-topbar__date"><span>Fri, Sep 4, 2026</span><strong>4:55 PM</strong></div>
       </header>
 
       {(status === 'unavailable' || actionError) && (
@@ -251,7 +273,7 @@ function ProductShell() {
         ))}
         <div className="po-mobile-more">
           <button type="button" aria-expanded={mobileMoreOpen} aria-haspopup="menu" onClick={() => setMobileMoreOpen((value) => !value)}><Icon name="menu" /><span>More</span></button>
-          {mobileMoreOpen && <div className="po-mobile-more__menu" role="menu"><NavLink role="menuitem" to="/app/activity"><Icon name="activity" />Activity</NavLink><NavLink role="menuitem" to="/app/integrations"><Icon name="integration" />Integrations</NavLink></div>}
+          {mobileMoreOpen && <div className="po-mobile-more__menu" role="menu"><div className="po-mobile-more__identity"><strong>{state?.user.name ?? 'Maya Chen'}</strong><small>{state?.user.roleLabel ?? 'Group Controller'}</small></div><NavLink role="menuitem" to="/app/activity"><Icon name="activity" />Activity</NavLink><NavLink role="menuitem" to="/app/integrations"><Icon name="integration" />Integrations</NavLink><button type="button" role="menuitem" disabled={status !== 'ready' || Boolean(pendingLabel)} onClick={() => { setMobileMoreOpen(false); void reset(); }}><Icon name="reset" />Reset workspace</button></div>}
         </div>
       </nav>
     </div>
@@ -337,41 +359,51 @@ export function ClosePage() {
       const ready = closes.filter((item) => item.status === 'READY').length;
       const blocked = closes.filter((item) => item.status === 'BLOCKED').length;
       const closed = closes.filter((item) => item.status === 'CLOSED').length;
-      const open = state.exceptions.filter((item) => item.status === 'OPEN').length;
       const variancePayouts = state.payouts.filter((item) => item.payoutDate !== state.metadata.businessDate && item.status === 'VARIANCE');
-      const variance = variancePayouts.length;
       return (
         <div className="po-page po-close-page">
           <div className="po-sr-only" role="status" aria-live="polite">{closedAnnouncement}</div>
-          <PageHeading
-            eyebrow="Friday close · Sep 4, 2026"
-            title="Daily close"
-            description={`${ready} locations ready · ${blocked} blocked · ${closed} closed · ${open} open operational exceptions · ${variance} prior payout variance`}
-          />
+          <header className="po-close-heading">
+            <div>
+              <span className="po-eyebrow">Daily close</span>
+              <h1>Friday Close</h1>
+              <p>Northline Motor Group</p>
+              <small>Review each location’s progress and resolve any exceptions before closing the day.</small>
+              <span className="po-sr-only">{ready} locations ready · {blocked} blocked · {closed} closed</span>
+            </div>
+            <time className="po-date-switcher" dateTime={state.metadata.businessDate}><Icon name="calendar" /><span>{businessDateLabel(state.metadata.businessDate)}</span></time>
+          </header>
           <section className="po-close-board" aria-label="Location close readiness">
-            <div className="po-close-board__legend" aria-hidden="true"><span>Location</span><span>Payments</span><span>DMS posting</span><span>Open work</span><span>Settlement</span><span>Close</span></div>
+            <div className="po-close-board__legend" aria-hidden="true">
+              <span>Location</span>
+              <span>Payments<small>Received</small></span>
+              <span>DMS posting<small>Verified</small></span>
+              <span>Open work<small>Blocking</small></span>
+              <span>Settlement<small>Independent</small></span>
+              <span>Close</span>
+            </div>
             {closes.map((close) => {
               const rooftop = state.rooftops.find((item) => item.id === close.rooftopId)!;
-              const payments = state.payments.filter((item) => item.rooftopId === rooftop.id && item.inFridayClose);
               const exceptions = state.exceptions.filter((item) => item.rooftopId === rooftop.id && item.status === 'OPEN');
               const payout = state.payouts.find((item) => item.rooftopId === rooftop.id && item.payoutDate === state.metadata.businessDate)!;
-              const total = payments.reduce((sum, item) => sum + (item.kind === 'REFUND' ? -item.amountCents : item.amountCents), 0);
+              const initials = rooftop.name.split(' ').map((word) => word[0]).join('').slice(-2);
               return (
                 <article key={rooftop.id} className={`po-close-rail po-close-rail--${close.status.toLocaleLowerCase()}`}>
-                  <header>
-                    <span className="po-location-code">{rooftop.code}</span>
-                    <div><h2>{rooftop.name}</h2><p>{rooftop.city} · {payments.length} payments · <Money cents={total} /></p></div>
-                    <Status value={close.status} />
+                  <header className="po-close-location">
+                    <span className="po-location-avatar">{initials}</span>
+                    <div><h2>{rooftop.name} <Icon name="chevron" /></h2></div>
                   </header>
-                  <div className="po-close-step po-close-step--complete"><span className="po-step-icon"><Icon name="check" /></span><div><small>Payments</small><strong>{close.paymentCount} received</strong><p>Friday scope complete</p></div></div>
-                  <div className={`po-close-step ${close.verifiedPostingCount === close.paymentCount ? 'po-close-step--complete' : 'po-close-step--attention'}`}><span className="po-step-icon">{close.verifiedPostingCount === close.paymentCount ? <Icon name="check" /> : close.verifiedPostingCount}</span><div><small>DMS posting</small><strong>{close.verifiedPostingCount} / {close.paymentCount} verified</strong><p>{close.paymentCount - close.verifiedPostingCount === 0 ? 'Every write verified' : `${close.paymentCount - close.verifiedPostingCount} await decisions`}</p></div></div>
-                  <div className={`po-close-step ${exceptions.length ? 'po-close-step--attention' : 'po-close-step--complete'}`}><span className="po-step-icon">{exceptions.length || <Icon name="check" />}</span><div><small>Open work</small><strong>{exceptions.length ? `${exceptions.length} blocking` : 'No blockers'}</strong>{exceptions.length ? <Link to={`/app/exceptions?location=${rooftop.code}&status=OPEN&sort=newest`}>Review exceptions <Icon name="arrow" /></Link> : <p>Operationally complete</p>}</div></div>
-                  <div className="po-settlement-cell"><small>Settlement</small><Status value={payout.status} compact /><p>Independent from close readiness</p></div>
+                  <div className="po-close-step po-close-step--complete"><span className="po-step-icon"><Icon name="check" /></span><div><strong>{close.paymentCount}</strong><p>Received</p></div></div>
+                  <div className={`po-close-step ${close.verifiedPostingCount === close.paymentCount ? 'po-close-step--complete' : 'po-close-step--attention'}`}><span className="po-step-icon">{close.verifiedPostingCount === close.paymentCount ? <Icon name="check" /> : '!'}</span><div><strong>{close.verifiedPostingCount}</strong><p>{close.verifiedPostingCount === close.paymentCount ? 'Verified' : 'Need review'}</p></div></div>
+                  <div className={`po-close-step ${exceptions.length ? 'po-close-step--attention' : 'po-close-step--complete'}`}><span className="po-step-icon">{exceptions.length || <Icon name="check" />}</span><div><strong>{exceptions.length || 'None'}</strong><p>{exceptions.length ? 'Blocking' : 'Open work'}</p></div></div>
+                  <div className="po-close-step po-close-step--settlement"><span className="po-step-icon"><Icon name={payout.status === 'RECONCILED' ? 'check' : 'clock'} /></span><div><strong>{sentenceCase(payout.status)}</strong><p>Independent</p></div></div>
                   <div className="po-close-action">
                     {close.status === 'CLOSED' && close.attestation ? (
                       <div className="po-attestation" data-close-attestation={rooftop.id} tabIndex={-1}><Icon name="check" /><strong>Closed by {close.closedBy}</strong><small>{localTime(close.closedAt!, true)}</small></div>
+                    ) : close.status === 'BLOCKED' ? (
+                      <Link className="po-close-endpoint po-close-endpoint--blocked" aria-label={`${close.blockingExceptionCount} blockers`} to={`/app/exceptions?location=${rooftop.code}&status=OPEN&sort=newest`}><i /><span><strong>Blocked</strong><small>{close.blockingExceptionCount} items</small></span><Icon name="chevron" /></Link>
                     ) : (
-                      <button className="po-button po-button--primary" disabled={close.status !== 'READY'} onClick={() => setConfirming(rooftop.id)}>{close.status === 'BLOCKED' ? `${close.blockingExceptionCount} blockers` : 'Close location'}</button>
+                      <button className="po-close-endpoint" aria-label="Close location" onClick={() => setConfirming(rooftop.id)}><i /><span><strong>Ready</strong><small>Close location</small></span><Icon name="chevron" /></button>
                     )}
                   </div>
                 </article>
@@ -379,13 +411,13 @@ export function ClosePage() {
             })}
           </section>
           {variancePayouts.length > 0 && <section className="po-prior-settlements" aria-labelledby="prior-settlements-title">
-            <header><div><span className="po-card-index">Separate settlement timeline</span><h2 id="prior-settlements-title">Prior settlements requiring attention</h2></div><p>These do not block today’s operational close.</p></header>
+            <header><div><h2 id="prior-settlements-title">Prior settlements requiring attention</h2></div></header>
+            <div className="po-prior-settlements__legend" aria-hidden="true"><span>Date</span><span>Location</span><span>Type</span><span>Details</span><span>Action</span></div>
             {variancePayouts.map((payout) => {
               const rooftop = state.rooftops.find((item) => item.id === payout.rooftopId)!;
-              return <Link className="po-prior-settlement-row" key={payout.id} to={`/app/deposits/${payout.id}`}><div><span className="po-location-code">{rooftop.code}</span><span><strong>{rooftop.name}</strong><small>Thursday payout · {payout.externalPayoutId}</small></span></div><span><small>Variance</small><Money cents={payout.varianceCents ?? 0} /></span><Status value={payout.status} /><b>Review <Icon name="arrow" /></b></Link>;
+              return <Link className="po-prior-settlement-row" key={payout.id} to={`/app/deposits/${payout.id}`}><time>Sep 3</time><div><strong>{rooftop.name}</strong><small>{rooftop.code}</small></div><span>Deposit variance</span><span><Money cents={payout.varianceCents ?? 0} /> unexplained</span><b>Review <Icon name="arrow" /></b></Link>;
             })}
           </section>}
-          <aside className="po-principle"><span>Close principle</span><p>Operational proof determines close readiness. Processor settlement is monitored alongside it, never wired in as a false prerequisite.</p></aside>
           {confirming && <ConfirmClose state={state} rooftopId={confirming} onDismiss={() => setConfirming(null)} onClosed={handleClosed} />}
         </div>
       );
@@ -430,25 +462,31 @@ export function ExceptionsPage() {
       });
       const update = (key: string, value: string) => { const next = new URLSearchParams(params); next.set(key, value); setParams(next); };
       return (
-        <div className="po-page">
-          <PageHeading eyebrow="Exception queue" title="Open work" description="Only decisions that require controller judgment appear here. Routine payments stay out of the way." />
-          <div className="po-filterbar">
-            <label>Location<select value={location} onChange={(event) => update('location', event.target.value)}><option value="ALL">All locations</option>{state.rooftops.map((item) => <option key={item.id} value={item.code}>{item.name}</option>)}</select></label>
-            <label>Department<select value={department} onChange={(event) => update('department', event.target.value)}><option value="ALL">All departments</option><option value="SERVICE">Service</option><option value="PARTS">Parts</option><option value="SALES">Sales</option></select></label>
-            <label>Type<select value={type} onChange={(event) => update('type', event.target.value)}><option value="ALL">All types</option>{[...new Set(state.exceptions.map((item) => item.type))].sort().map((value) => <option key={value} value={value}>{sentenceCase(value)}</option>)}</select></label>
-            <label>Status<select value={status} onChange={(event) => update('status', event.target.value)}><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option><option value="ALL">All</option></select></label>
-            <label>Sort<select value={sort} onChange={(event) => update('sort', event.target.value)}><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="amount-high">Amount high</option></select></label>
-            <span className="po-filterbar__count">{items.length} {items.length === 1 ? 'exception' : 'exceptions'}</span>
-          </div>
+        <div className="po-page po-exceptions-page">
+          <Link className="po-back-link" to="/app/close"><span>←</span> Back to Close</Link>
+          <header className="po-exceptions-heading">
+            <div><span className="po-eyebrow">Exceptions</span><h1>{rooftop?.name ?? 'All locations'}</h1><p><strong>{items.length} {items.length === 1 ? 'item' : 'items'} blocking close</strong></p><small>Review and resolve the exceptions below to complete today’s close.</small></div>
+            <details className="po-filter-menu">
+              <summary><Icon name="adjust" /> Sort by {sort === 'amount-high' ? 'Amount' : sentenceCase(sort)} <Icon name="chevron" /></summary>
+              <div className="po-filterbar">
+                <label>Location<select value={location} onChange={(event) => update('location', event.target.value)}><option value="ALL">All locations</option>{state.rooftops.map((item) => <option key={item.id} value={item.code}>{item.name}</option>)}</select></label>
+                <label>Department<select value={department} onChange={(event) => update('department', event.target.value)}><option value="ALL">All departments</option><option value="SERVICE">Service</option><option value="PARTS">Parts</option><option value="SALES">Sales</option></select></label>
+                <label>Type<select value={type} onChange={(event) => update('type', event.target.value)}><option value="ALL">All types</option>{[...new Set(state.exceptions.map((item) => item.type))].sort().map((value) => <option key={value} value={value}>{sentenceCase(value)}</option>)}</select></label>
+                <label>Status<select value={status} onChange={(event) => update('status', event.target.value)}><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option><option value="ALL">All</option></select></label>
+                <label>Sort<select value={sort} onChange={(event) => update('sort', event.target.value)}><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="amount-high">Amount high</option></select></label>
+              </div>
+            </details>
+          </header>
           <section className="po-work-slips" aria-label="Exceptions">
             {items.map((exception) => {
               const payment = state.payments.find((item) => item.id === exception.paymentId)!;
               return (
                 <Link className="po-work-slip" to={`/app/exceptions/${exception.id}`} key={exception.id}>
-                  <div className="po-work-slip__meta"><span>{exception.id}</span><Status value={exception.status} compact /><small>{sentenceCase(exception.department)}</small></div>
-                  <div className="po-work-slip__body"><h2>{exception.title}</h2><p>{exception.summary}</p><span>{payment.customerLabel} · {payment.methodType} •••• {payment.cardLast4}</span></div>
-                  <div className="po-work-slip__amount"><Money cents={payment.kind === 'REFUND' ? -payment.amountCents : payment.amountCents} signed={payment.kind === 'REFUND'} /><small>{payment.id}</small></div>
-                  <div className="po-work-slip__age"><Icon name="clock" /><strong>{exceptionAge(state, exception)} min</strong><span>{exceptionActionLabel(exception)} <Icon name="arrow" /></span></div>
+                  <div className="po-work-slip__meta"><span>{exception.id}</span><small>{sentenceCase(exception.department)}</small><em>Payment exception</em></div>
+                  <div className="po-work-slip__amount"><Money cents={payment.kind === 'REFUND' ? -payment.amountCents : payment.amountCents} signed={payment.kind === 'REFUND'} /><strong>{payment.customerLabel}</strong><small>{payment.id} · {payment.methodType} •••• {payment.cardLast4}</small></div>
+                  <div className="po-work-slip__body"><h2>{exception.title}</h2><p>{exception.summary}</p></div>
+                  <div className="po-work-slip__age"><Icon name="clock" /><strong>{exceptionAge(state, exception)} min ago</strong></div>
+                  <div className="po-work-slip__review"><span>Review</span><Icon name="arrow" /><small>{exceptionActionLabel(exception)}</small></div>
                 </Link>
               );
             })}
@@ -487,6 +525,7 @@ export function ExceptionDetailPage() {
       const unsupportedShortfall = exception.type === 'AMBIGUOUS_MATCH' && targetRecord
         ? Math.max(0, payment.amountCents - targetRecord.balanceCents)
         : 0;
+      const evidenceLabels = [...new Set(exception.candidates.flatMap((candidate) => candidate.evidence.map((fact) => fact.label)))];
       const actionLabel = exception.type === 'UNMATCHED_REFUND'
         ? `Link ${formatMoney(payment.amountCents)} refund to ${selected?.recordNumber ?? 'original payment'}`
         : exception.type === 'SPLIT_ALLOCATION'
@@ -494,62 +533,73 @@ export function ExceptionDetailPage() {
           : `Apply ${formatMoney(payment.amountCents)} to ${selected?.recordNumber ?? 'record'}`;
       return (
         <div className="po-page po-decision-page">
-          <Breadcrumbs><Link to="/app/exceptions">Exceptions</Link><Icon name="chevron" /><span>{exception.id}</span></Breadcrumbs>
-          <PageHeading eyebrow={`${rooftop.name} · ${sentenceCase(exception.department)}`} title={exception.title} description={exception.summary} action={<div className="po-heading-status"><Status value={exception.status} /><small>Opened {exceptionAge(state, exception)} min ago</small></div>} />
+          <Link className="po-back-link" to="/app/exceptions"><span>←</span> Back to Exceptions</Link>
+          <header className="po-decision-heading">
+            <div><div className="po-decision-heading__id"><h1>{exception.id}</h1><Status value={exception.status} compact /></div><h2>{exception.title}</h2><p>{exception.summary}</p></div>
+            <dl><DetailFact label="Location">{rooftop.name}</DetailFact><DetailFact label="Opened">{exceptionAge(state, exception)} min ago</DetailFact><DetailFact label="Business date">Sep 4, 2026</DetailFact></dl>
+          </header>
           {exception.status === 'RESOLVED' && exception.resolution ? (
             <section className="po-resolution-complete" role="status" aria-live="polite"><span><Icon name="check" /></span><div><small>Dealership-system write verified</small><h2>{exception.resolution.targetLabel}</h2><p>Resolved by {exception.resolution.actor} at {localTime(exception.resolution.resolvedAt)}. One operation key produced one financial mutation.</p></div><Status value={dmsBusinessLabel('VERIFIED')} /></section>
           ) : (
-            <div className="po-decision-bench">
-              <section className="po-source-card">
-                <span className="po-card-index">01 · Source payment</span>
-                <div className="po-source-card__amount"><Money cents={payment.kind === 'REFUND' ? -payment.amountCents : payment.amountCents} signed={payment.kind === 'REFUND'} /><Status value={payment.paymentState} compact /></div>
-                <h2>{payment.customerLabel}</h2>
-                <dl>
-                  <DetailFact label="Payment">{payment.id}</DetailFact>
-                  <DetailFact label="Method">{payment.methodType} •••• {payment.cardLast4}</DetailFact>
-                  <DetailFact label="Captured">{localTime(payment.receivedAt, true)}</DetailFact>
-                  <DetailFact label="Terminal">{payment.terminalLabel}</DetailFact>
-                  <DetailFact label="Processor ref">{payment.processorTransactionId}</DetailFact>
-                </dl>
-              </section>
-
-              <section className="po-candidate-panel">
-                <span className="po-card-index">02 · Evidence comparison</span>
-                <fieldset>
-                  <legend>Select the record supported by the evidence</legend>
-                  {exception.candidates.map((candidate) => (
-                    <label key={candidate.id} className={`po-candidate ${selectedId === candidate.id ? 'po-candidate--selected' : ''}`}>
-                      <input type="radio" name="candidate" value={candidate.id} checked={selectedId === candidate.id} disabled={Boolean(pendingLabel)} onChange={() => setSelection(candidate.id)} />
-                      <span className="po-candidate__radio" />
-                      <span className="po-candidate__title"><strong>{candidate.recordNumber}</strong><small>{candidate.statusLabel}</small></span>
-                      <span className="po-candidate__customer">{candidate.customerLabel}<small>{candidate.vehicleLabel ?? sentenceCase(candidate.department)}{candidate.advisorLabel ? ` · ${candidate.advisorLabel}` : ''}</small></span>
-                      <Money cents={candidate.amountCents} />
-                      <span className={`po-recommendation po-recommendation--${candidate.recommendation === 'STRONG_MATCH' ? 'strong' : 'possible'}`}>{sentenceCase(candidate.recommendation)}</span>
-                      <span className="po-candidate__evidence">
-                        {candidate.evidence.map((fact) => <small key={fact.label} className={`po-evidence-fact po-evidence-fact--${fact.tone.toLocaleLowerCase()}`}><b>{fact.label}</b>{fact.value}</small>)}
-                      </span>
-                    </label>
-                  ))}
-                </fieldset>
-              </section>
-
-              <section className="po-selected-card">
-                <span className="po-card-index">03 · Controller decision</span>
-                {selected ? <>
-                  <div className="po-selected-card__heading"><span><Icon name="check" /></span><div><small>Selected record</small><h2>{selected.recordNumber}</h2></div></div>
+            <>
+              <div className="po-decision-bench">
+                <section className="po-source-card">
+                  <span className="po-bench-label">Payment</span>
+                  <div className="po-source-card__amount"><Money cents={payment.kind === 'REFUND' ? -payment.amountCents : payment.amountCents} signed={payment.kind === 'REFUND'} /></div>
+                  <h2>{payment.customerLabel}</h2>
+                  <p>{payment.methodType} •••• {payment.cardLast4}</p>
                   <dl>
-                    <DetailFact label="Customer">{selected.customerLabel}</DetailFact>
-                    <DetailFact label="Department">{sentenceCase(selected.department)}</DetailFact>
-                    {selected.advisorLabel && <DetailFact label="Advisor">{selected.advisorLabel}</DetailFact>}
-                    {targetRecord && <DetailFact label="Current balance"><Money cents={targetRecord.balanceCents} /></DetailFact>}
-                    {targetPayment && <DetailFact label="Original payment">{targetPayment.id} · {localTime(targetPayment.receivedAt, true)}</DetailFact>}
-                    {exception.type === 'SPLIT_ALLOCATION' && <><DetailFact label="Already posted"><Money cents={155_000} /></DetailFact><DetailFact label="This payment"><Money cents={245_000} /></DetailFact><DetailFact label="Customer-pay total"><Money cents={400_000} /></DetailFact></>}
+                    <DetailFact label="Payment ID">{payment.id}</DetailFact>
+                    <DetailFact label="Location">{rooftop.name}</DetailFact>
+                    <DetailFact label="Department">{sentenceCase(payment.department)}</DetailFact>
+                    <DetailFact label="Captured">{localTime(payment.receivedAt, true)}</DetailFact>
+                    <DetailFact label="Terminal">{payment.terminalLabel}</DetailFact>
                   </dl>
-                  <div className={`po-write-note${unsupportedShortfall ? ' po-write-note--blocked' : ''}`}><strong>{unsupportedShortfall ? 'This choice cannot be posted as-is' : 'What happens next'}</strong><p>{unsupportedShortfall ? `${selected.recordNumber} has ${formatMoney(unsupportedShortfall)} less open balance than this payment. Choose the exact-balance record or leave this exception unresolved.` : 'PostOnce writes once with a stable operation key, verifies the result, then clears this blocker.'}</p></div>
-                  <button className="po-button po-button--primary po-button--full" disabled={!selected || Boolean(pendingLabel) || unsupportedShortfall > 0} onClick={() => void resolveException(exception.id, exception.version, selected.targetId)}>{pendingLabel ?? (unsupportedShortfall ? `Cannot apply · ${formatMoney(unsupportedShortfall)} over balance` : actionLabel)}{!unsupportedShortfall && <Icon name="arrow" />}</button>
-                </> : <p>Select a candidate to continue.</p>}
-              </section>
-            </div>
+                </section>
+
+                <section className="po-candidate-panel">
+                  <span className="po-bench-label">Match analysis</span>
+                  <fieldset>
+                    <legend>{exception.candidates.length} possible records</legend>
+                    <div className="po-candidate-headings">
+                      <span>Compare</span>
+                      {exception.candidates.map((candidate) => (
+                        <label key={candidate.id} className={selectedId === candidate.id ? 'selected' : ''}>
+                          <input type="radio" name="candidate" value={candidate.id} checked={selectedId === candidate.id} disabled={Boolean(pendingLabel)} onChange={() => setSelection(candidate.id)} />
+                          <span className="po-candidate__radio" />
+                          <span><strong>{candidate.recordNumber}</strong><small>{candidate.statusLabel}</small></span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="po-comparison-matrix">
+                      {evidenceLabels.map((label) => <div className="po-comparison-row" key={label}><span>{label}</span>{exception.candidates.map((candidate) => { const fact = candidate.evidence.find((item) => item.label === label); return <div key={candidate.id} className={`${selectedId === candidate.id ? 'selected ' : ''}po-evidence-fact--${fact?.tone.toLocaleLowerCase() ?? 'context'}`}><strong>{fact?.value ?? '—'}</strong></div>; })}</div>)}
+                      <div className="po-comparison-row po-comparison-row--recommendation"><span>Assessment</span>{exception.candidates.map((candidate) => <div key={candidate.id} className={selectedId === candidate.id ? 'selected' : ''}><span className={`po-recommendation po-recommendation--${candidate.recommendation === 'STRONG_MATCH' ? 'strong' : 'possible'}`}>{sentenceCase(candidate.recommendation)}</span></div>)}</div>
+                    </div>
+                  </fieldset>
+                </section>
+
+                <section className="po-selected-card">
+                  <span className="po-bench-label">Selected record</span>
+                  {selected ? <>
+                    <div className="po-selected-card__heading"><span><Icon name="check" /></span><div><small>{selected.statusLabel}</small><h2>{selected.recordNumber}</h2></div></div>
+                    <dl>
+                      <DetailFact label="Customer">{selected.customerLabel}</DetailFact>
+                      {selected.vehicleLabel && <DetailFact label="Vehicle">{selected.vehicleLabel}</DetailFact>}
+                      <DetailFact label="Department">{sentenceCase(selected.department)}</DetailFact>
+                      {selected.advisorLabel && <DetailFact label="Advisor">{selected.advisorLabel}</DetailFact>}
+                      {targetRecord && <><DetailFact label="Customer-pay total"><Money cents={targetRecord.customerPayCents} /></DetailFact><DetailFact label="Open balance"><Money cents={targetRecord.balanceCents} /></DetailFact></>}
+                      {targetPayment && <DetailFact label="Original payment">{targetPayment.id} · {localTime(targetPayment.receivedAt, true)}</DetailFact>}
+                      {exception.type === 'SPLIT_ALLOCATION' && <><DetailFact label="Already posted"><Money cents={155_000} /></DetailFact><DetailFact label="This payment"><Money cents={245_000} /></DetailFact></>}
+                    </dl>
+                    <div className={`po-write-note${unsupportedShortfall ? ' po-write-note--blocked' : ''}`}><strong>{unsupportedShortfall ? 'Balance does not support this payment' : 'Ready to apply'}</strong><p>{unsupportedShortfall ? `${formatMoney(unsupportedShortfall)} exceeds the remaining balance.` : 'One verified write will clear this blocker.'}</p></div>
+                  </> : <p>Select a candidate to continue.</p>}
+                </section>
+              </div>
+              <div className="po-decision-actions">
+                <div><Link to="/app/exceptions">Leave unresolved</Link><button type="button" onClick={() => document.getElementById('workspace-search')?.focus()}>Search other records</button></div>
+                <button className="po-button po-button--primary" disabled={!selected || Boolean(pendingLabel) || unsupportedShortfall > 0} onClick={() => selected && void resolveException(exception.id, exception.version, selected.targetId)}>{pendingLabel ?? (unsupportedShortfall ? `Cannot apply · ${formatMoney(unsupportedShortfall)} over balance` : actionLabel)}{!unsupportedShortfall && <Icon name="arrow" />}</button>
+              </div>
+            </>
           )}
           <section className="po-detail-activity"><div className="po-section-heading"><div><span className="po-card-index">Business activity</span><h2>Activity</h2></div></div><ol><li><time>{localTime(exception.openedAt)}</time><div><strong>Exception opened</strong><p>{exception.summary}</p></div></li>{exceptionAudits.map((event) => <li key={event.id}><time>{localTime(event.occurredAt)}</time><div><strong>{event.summary}</strong><p>{event.actor}</p></div></li>)}</ol></section>
           <details className="po-technical-evidence"><summary>Technical evidence <span>Collapsed by default</span><Icon name="chevron" /></summary><dl><DetailFact label="Processor event">{payment.externalEventId}</DetailFact><DetailFact label="Record version">{exception.version}</DetailFact><DetailFact label="Posting operation">{payment.postingOperationKey ?? 'Created after the decision is accepted'}</DetailFact><DetailFact label="Recorded attempts">{exceptionAttempts.length}</DetailFact></dl></details>
@@ -632,31 +682,35 @@ export function PaymentDetailPage() {
       const record = state.dmsRecords.find((item) => item.id === payment.linkedRecordId);
       const allocation = state.allocations.find((item) => item.paymentId === payment.id);
       const attempts = state.integrationAttempts.filter((item) => item.externalEventId === payment.externalEventId || item.operationKey === payment.postingOperationKey);
-      const audits = state.auditEvents.filter((item) => item.entityId === payment.id);
       const lost = attempts.some((item) => item.status === 'RESPONSE_LOST');
       return (
         <div className="po-page po-payment-detail">
-          <Breadcrumbs><Link to="/app/payments">Payments</Link><Icon name="chevron" /><span>{payment.id}</span></Breadcrumbs>
-          <PageHeading eyebrow={`${rooftop.name} · ${sentenceCase(payment.department)}`} title={payment.customerLabel} description={`${payment.id} · ${payment.methodType} •••• ${payment.cardLast4} · captured ${localTime(payment.receivedAt, true)}`} action={<div className="po-heading-money"><Money cents={payment.kind === 'REFUND' ? -payment.amountCents : payment.amountCents} signed={payment.kind === 'REFUND'} /></div>} />
+          <Link className="po-back-link" to="/app/payments"><span>←</span> Back to Payments</Link>
+          <header className="po-payment-heading">
+            <div><span className="po-eyebrow">Payment</span><h1><Money cents={payment.kind === 'REFUND' ? -payment.amountCents : payment.amountCents} signed={payment.kind === 'REFUND'} /></h1><p>{payment.kind === 'REFUND' ? 'Refund payment' : 'Routine payment'}</p><small>{rooftop.name} · {sentenceCase(payment.department)}{record ? ` · ${record.recordNumber}` : ''}</small></div>
+          </header>
           <section className="po-state-ribbon" aria-label="Payment lifecycle">
-            <div className="complete"><span><Icon name="check" /></span><small>Payment</small><strong>{sentenceCase(payment.paymentState)}</strong></div>
-            <i />
-            <div className={payment.dmsState === 'VERIFIED' ? 'complete' : 'attention'}><span>{payment.dmsState === 'VERIFIED' ? <Icon name="check" /> : '!'}</span><small>DMS posting</small><strong>{dmsBusinessLabel(payment.dmsState)}</strong></div>
-            <i />
-            <div className={payment.settlementState === 'RECONCILED' ? 'complete' : ''}><span>{payment.settlementState === 'RECONCILED' ? <Icon name="check" /> : <Icon name="clock" />}</span><small>Settlement</small><strong>{sentenceCase(payment.settlementState)}</strong></div>
+            <div className="complete"><span><Icon name="check" /></span><div><small>Payment</small><strong>{sentenceCase(payment.paymentState)}</strong><p>{localTime(payment.receivedAt, true)} · {payment.methodType} •••• {payment.cardLast4}</p></div></div>
+            <div className={payment.dmsState === 'VERIFIED' ? 'complete' : 'attention'}><span>{payment.dmsState === 'VERIFIED' ? <Icon name="check" /> : '!'}</span><div><small>DMS posting</small><strong>{dmsBusinessLabel(payment.dmsState)}</strong><p>{record ? `${record.recordNumber} · ${record.customerLabel}` : 'Controller decision required'}</p></div></div>
+            <div className={payment.settlementState === 'RECONCILED' ? 'complete' : ''}><span>{payment.settlementState === 'RECONCILED' ? <Icon name="check" /> : <Icon name="clock" />}</span><div><small>Settlement</small><strong>{sentenceCase(payment.settlementState)}</strong><p>{payment.settlementState === 'RECONCILED' ? 'Included in processor payout' : 'Tracked independently'}</p></div></div>
           </section>
-          <div className="po-payment-grid">
-            <section className="po-panel"><span className="po-card-index">Payment context</span><dl className="po-detail-list"><DetailFact label="Processor reference">{payment.processorTransactionId}</DetailFact><DetailFact label="Terminal">{payment.terminalLabel}</DetailFact><DetailFact label="Business date">Friday, Sep 4, 2026</DetailFact><DetailFact label="Currency">Canadian dollars</DetailFact></dl></section>
-            <section className="po-panel"><span className="po-card-index">Applied record</span>{record ? <><div className="po-record-heading"><span>{record.recordType === 'REPAIR_ORDER' ? 'RO' : record.recordType === 'PARTS_TICKET' ? 'PT' : 'D'}</span><div><h2>{record.recordNumber}</h2><p>{record.vehicleLabel ?? sentenceCase(record.department)}</p></div><Status value={dmsBusinessLabel(payment.dmsState)} compact /></div><dl className="po-detail-list"><DetailFact label="Customer">{record.customerLabel}</DetailFact><DetailFact label="Advisor">{record.advisorLabel ?? '—'}</DetailFact><DetailFact label="Applied"><Money cents={allocation?.amountCents ?? payment.amountCents} /></DetailFact><DetailFact label="Balance"><Money cents={record.balanceCents} /></DetailFact></dl></> : <p>No DMS record has been selected yet.</p>}</section>
-          </div>
-          <section className="po-history"><div className="po-section-heading"><div><span className="po-card-index">Immutable history</span><h2>Payment activity</h2></div><small>{attempts.length} integration attempts</small></div>
-            <ol>
-              <li><span className="po-timeline-dot po-timeline-dot--good"><Icon name="check" /></span><time>{localTime(payment.receivedAt)}</time><div><strong>Payment received</strong><p>Northstar processor event accepted into the workspace.</p></div></li>
-              {payment.matchedAt && <li><span className="po-timeline-dot po-timeline-dot--good"><Icon name="check" /></span><time>{localTime(payment.matchedAt)}</time><div><strong>Record matched</strong><p>{record?.recordNumber ?? 'Selected record'} linked with {allocation?.source === 'HUMAN_RESOLUTION' ? 'controller judgment' : 'an exact reference'}.</p></div></li>}
-              {lost && <li className="po-evidence-seam-row"><details><summary><span className="po-timeline-dot po-timeline-dot--evidence">E</span><time>{localTime(payment.postedAt ?? payment.receivedAt)}</time><div><strong>Evidence · response recovery</strong><p>The write outcome was uncertain, then verified without posting twice.</p></div><span className="po-details-label">View evidence <Icon name="chevron" /></span></summary><div className="po-evidence-seam"><div className="po-evidence-seam__intro"><span>Evidence seam</span><h3>One effect, proven across two attempts</h3><p>The first request committed inside the dealership system but its response was lost. Recovery reused the same operation key and found the existing post.</p></div><div className="po-proof-chain">{attempts.filter((item) => item.system === 'LEGACY_DMS').map((attempt) => <article key={attempt.id}><small>Attempt {attempt.attempt}</small><Status value={attempt.status} compact /><strong>{attempt.operation}</strong><p>{attempt.note}</p><code>{attempt.operationKey}</code></article>)}<article className="po-proof-result"><small>Financial mutations</small><strong>1</strong><p>Stable operation identity prevented a duplicate write.</p></article></div></div></details></li>}
-              {payment.verifiedAt && <li><span className="po-timeline-dot po-timeline-dot--good"><Icon name="check" /></span><time>{localTime(payment.verifiedAt)}</time><div><strong>Posting verified</strong><p>Dealership-system state confirms the financial effect.</p></div></li>}
-              {audits.map((event) => <li key={event.id}><span className="po-timeline-dot"><Icon name="activity" /></span><time>{localTime(event.occurredAt)}</time><div><strong>{event.summary}</strong><p>{event.actor}</p></div></li>)}
-            </ol>
+          <section className="po-history"><div className="po-section-heading"><div><span className="po-eyebrow">Immutable record</span><h2>Payment History</h2></div><small>{attempts.length} integration attempts</small></div>
+            <div className="po-payment-history-grid">
+              <ol>
+                <li><span className="po-timeline-dot po-timeline-dot--good"><Icon name="check" /></span><time>{localTime(payment.receivedAt)}</time><div><strong>Payment received</strong><p>Processor authorization captured.</p></div></li>
+                {payment.matchedAt && <li><span className="po-timeline-dot po-timeline-dot--good"><Icon name="check" /></span><time>{localTime(payment.matchedAt)}</time><div><strong>Matched to {record?.recordNumber ?? 'record'}</strong><p>{allocation?.source === 'HUMAN_RESOLUTION' ? 'Controller judgment accepted.' : 'Exact repair-order reference.'}</p></div></li>}
+                {payment.postedAt && <li><span className="po-timeline-dot po-timeline-dot--good"><Icon name="check" /></span><time>{localTime(payment.postedAt)}</time><div><strong>Posted to dealership system</strong><p>Stable operation identity recorded.</p></div></li>}
+                {payment.verifiedAt && <li><span className="po-timeline-dot po-timeline-dot--good"><Icon name="check" /></span><time>{localTime(payment.verifiedAt)}</time><div><strong>Posting verified</strong><p>Existing DMS write confirmed.</p></div></li>}
+              </ol>
+              {lost && <details className="po-payment-evidence"><summary><strong>Evidence · response recovery</strong><span><b className="po-payment-evidence__expand">Expand</b><b className="po-payment-evidence__collapse">Collapse</b><Icon name="chevron" /></span></summary><div className="po-payment-evidence__body"><span className="po-sr-only">One effect, proven across two attempts</span><div className="po-proof-table"><div className="po-proof-table__head"><span>Attempt</span><span>Operation</span><span>Result</span></div>{attempts.filter((item) => item.system === 'LEGACY_DMS').map((attempt) => <div className="po-proof-table__row" key={attempt.id}><strong>{localTime(attempt.occurredAt)}</strong><div><b>{attempt.operation}</b><code>{attempt.operationKey}</code><small>{attempt.note}</small></div><Status value={attempt.status} compact /></div>)}<div className="po-proof-table__result"><span>Financial mutations</span><strong>1</strong><small>No duplicate posting</small></div></div></div></details>}
+            </div>
+          </section>
+          <section className="po-payment-details">
+            <div className="po-section-heading"><div><span className="po-eyebrow">Record context</span><h2>Business details</h2></div></div>
+            <div className="po-payment-details__grid">
+              <dl><DetailFact label="Customer">{payment.customerLabel}</DetailFact><DetailFact label="Processor reference">{payment.processorTransactionId}</DetailFact><DetailFact label="Terminal">{payment.terminalLabel}</DetailFact><DetailFact label="Business date">Friday, Sep 4, 2026</DetailFact></dl>
+              {record ? <dl><DetailFact label="Applied record">{record.recordNumber}</DetailFact><DetailFact label="Vehicle">{record.vehicleLabel ?? '—'}</DetailFact><DetailFact label="Advisor">{record.advisorLabel ?? '—'}</DetailFact><DetailFact label="Applied amount"><Money cents={allocation?.amountCents ?? payment.amountCents} /></DetailFact></dl> : <p>No DMS record has been selected yet.</p>}
+            </div>
             <details className="po-technical-evidence"><summary>Technical identifiers <span>Evidence seam</span><Icon name="chevron" /></summary><dl><DetailFact label="Processor event">{payment.externalEventId}</DetailFact><DetailFact label="Operation key">{payment.postingOperationKey ?? 'Not created'}</DetailFact><DetailFact label="Correlation IDs">{[...new Set(attempts.map((item) => item.correlationId))].join(', ') || 'None recorded'}</DetailFact></dl></details>
           </section>
         </div>
@@ -693,10 +747,20 @@ export function DepositDetailPage() {
       const adjustments = state.settlementAdjustments.filter((item) => item.payoutId === payout.id);
       const evidence = sources.find((item) => item.component === 'NETWORK_ASSESSMENT_NOTICE');
       const actionable = payout.id === 'payout_9842' && payout.status === 'VARIANCE' && evidence;
-      return <div className="po-page po-deposit-detail"><Breadcrumbs><Link to="/app/deposits">Deposits</Link><Icon name="chevron" /><span>{payout.externalPayoutId ?? 'Pending payout'}</span></Breadcrumbs><PageHeading eyebrow={`${rooftop.name} · ${payout.payoutDate}`} title={payout.externalPayoutId ?? 'Payout pending'} description={payout.status === 'PAYOUT_PENDING' ? 'The processor has not batched this business day yet. Operational close remains independent.' : 'Reconcile the processor model against the observed bank deposit without rewriting source evidence.'} action={<Status value={payout.status} />} />
-        {payout.originalExpectedCents === null ? <section className="po-pending-deposit"><Icon name="clock" /><h2>Awaiting processor batch</h2><p>This is normal for the current business day. It does not block the location’s operational close.</p></section> : <div className="po-settlement-layout"><section className="po-ledger-card"><span className="po-card-index">Settlement arithmetic</span><h2>Expected payout</h2><div className="po-ledger-lines"><div><span>Captured payments</span><Money cents={payout.capturedCents ?? 0} /></div><div><span>Refunds</span><Money cents={-(payout.refundCents ?? 0)} signed /></div><div><span>Processor fees</span><Money cents={-(payout.feeCents ?? 0)} signed /></div><div><span>Adjustments</span><Money cents={adjustments.reduce((sum, item) => sum + item.amountCents, 0)} signed /></div><div className="po-ledger-total"><span>{adjustments.length ? 'Adjusted expected payout' : 'Expected payout'}</span><Money cents={payout.adjustedExpectedCents ?? 0} /></div><div><span>Observed deposit</span><Money cents={payout.observedBankCents ?? 0} /></div><div className={payout.varianceCents === 0 ? 'po-ledger-variance po-ledger-variance--clear' : 'po-ledger-variance'}><span>Variance</span><Money cents={payout.varianceCents ?? 0} /></div></div>{adjustments.length > 0 && <p className="po-original-expected">Original expected preserved · <Money cents={payout.originalExpectedCents ?? 0} /></p>}</section>
-          <section className="po-evidence-card"><span className="po-card-index">Immutable source records</span><h2>Why the numbers differ</h2><div className="po-source-records">{sources.map((source) => <article key={source.id}><div><Status value={source.component === 'NETWORK_ASSESSMENT_NOTICE' ? 'REVIEW' : 'VERIFIED'} compact /><small>{localTime(source.receivedAt, true)}</small></div><strong>{sentenceCase(source.component)}</strong><p>{source.description}</p><Money cents={source.amountCents} signed={source.amountCents < 0} /><code>{source.externalEventId}</code></article>)}</div></section>
-          <section className="po-adjustment-card"><span className="po-card-index">Controller adjustment</span>{actionable ? <><h2>Record the documented assessment</h2><p>The source notice supports a signed −$25.00 adjustment. The original expected amount remains unchanged for audit.</p><dl className="po-adjustment-preview"><DetailFact label="Code">Network assessment</DetailFact><DetailFact label="Amount"><Money cents={-2500} signed /></DetailFact><DetailFact label="Evidence">{evidence.externalEventId}</DetailFact><DetailFact label="Resulting variance"><Money cents={0} /></DetailFact></dl><label className="po-note-field">Optional controller note<textarea value={note} maxLength={500} onChange={(event) => setNote(event.target.value)} placeholder="Add context without altering source evidence" /></label><button className="po-button po-button--primary po-button--full" disabled={Boolean(pendingLabel)} onClick={() => void recordAdjustment(payout.id, payout.version, evidence.id, note || undefined)}>{pendingLabel ?? 'Record −$25.00 network assessment adjustment'}<Icon name="arrow" /></button></> : payout.status === 'RECONCILED' ? <div className="po-adjustment-complete" role="status" aria-live="polite"><span><Icon name="check" /></span><h2>Deposit reconciled</h2><p>{adjustments.length ? `Adjustment recorded by ${adjustments.at(-1)?.actor}.` : 'Expected and observed amounts agree.'}</p><Status value="RECONCILED" /></div> : <><h2>No controller action available</h2><p>The immutable source records do not support a settlement adjustment.</p></>}</section></div>}
+      return <div className="po-page po-deposit-detail">
+        <Link className="po-back-link" to="/app/deposits"><span>←</span> Back to Deposits</Link>
+        <header className="po-deposit-heading"><div><h1>{rooftop.name}</h1><h2>Daily deposit reconciliation</h2><time className="po-deposit-date" dateTime={payout.payoutDate}><Icon name="calendar" />{businessDateLabel(payout.payoutDate)}</time></div><dl><DetailFact label="Payout">{payout.externalPayoutId ?? 'Pending'}</DetailFact><DetailFact label="Status"><Status value={payout.status} compact /></DetailFact></dl></header>
+        {payout.originalExpectedCents === null ? <section className="po-pending-deposit"><Icon name="clock" /><h2>Awaiting processor batch</h2><p>This is normal for the current business day. It does not block the location’s operational close.</p></section> : <div className="po-settlement-layout">
+          <section className="po-ledger-card">
+            <span className="po-bench-label">Settlement workpaper</span><h2>Payout reconciliation</h2><p>Processor components</p>
+            <div className="po-ledger-lines"><div><span>Captured payments</span><Money cents={payout.capturedCents ?? 0} /></div><div><span>Refunds</span><Money cents={-(payout.refundCents ?? 0)} signed /></div><div><span>Processor fees</span><Money cents={-(payout.feeCents ?? 0)} signed /></div>{adjustments.length > 0 && <div><span>Recorded adjustments</span><Money cents={adjustments.reduce((sum, item) => sum + item.amountCents, 0)} signed /></div>}<div className="po-ledger-total"><span>{adjustments.length ? 'Adjusted expected deposit' : 'Expected deposit'}</span><Money cents={payout.adjustedExpectedCents ?? 0} /></div><div className="po-ledger-observed"><span>Observed bank deposit</span><Money cents={payout.observedBankCents ?? 0} /></div><div className={payout.varianceCents === 0 ? 'po-ledger-variance po-ledger-variance--clear' : 'po-ledger-variance'}><span>Variance</span><Money cents={payout.varianceCents ?? 0} /></div></div>
+            {adjustments.length > 0 && <p className="po-original-expected">Original expected preserved · <Money cents={payout.originalExpectedCents ?? 0} /></p>}
+            <div className="po-source-ledger"><h3>Source evidence</h3><div className="po-source-ledger__head"><span>Component</span><span>Received</span><span>Amount</span></div>{sources.map((source) => <div className="po-source-ledger__row" key={source.id}><span><strong>{sentenceCase(source.component)}</strong><small>{source.description}</small></span><time>{localTime(source.receivedAt)}</time><Money cents={source.amountCents} signed={source.amountCents < 0} /></div>)}</div>
+          </section>
+          <section className="po-adjustment-card">
+            {actionable ? <><div className="po-variance-alert"><span>!</span><div><small>Unexplained variance</small><h2><Money cents={payout.varianceCents ?? 0} /></h2><p>The observed deposit is below the processor model.</p></div></div><div className="po-variance-detail"><span className="po-bench-label">Variance detail</span><dl><DetailFact label="Expected"><Money cents={payout.adjustedExpectedCents ?? 0} /></DetailFact><DetailFact label="Observed"><Money cents={payout.observedBankCents ?? 0} /></DetailFact><DetailFact label="Supported adjustment"><Money cents={-2500} signed /></DetailFact><DetailFact label="Result"><Money cents={0} /> variance</DetailFact></dl></div><div className="po-evidence-file"><Icon name="document" /><span><small>Evidence found</small><strong>Network assessment notice</strong><em>{evidence.externalEventId}</em></span><Icon name="external" /></div><label className="po-note-field">Controller note <span>Optional</span><textarea value={note} maxLength={500} onChange={(event) => setNote(event.target.value)} placeholder="Add context without altering source evidence" /></label><button className="po-button po-button--primary po-button--full" aria-label="Record −$25.00 network assessment adjustment" disabled={Boolean(pendingLabel)} onClick={() => void recordAdjustment(payout.id, payout.version, evidence.id, note || undefined)}>{pendingLabel ?? 'Record supported adjustment'}<Icon name="arrow" /></button><Link className="po-button po-button--quiet po-button--full" to="/app/deposits">Leave unresolved</Link></> : payout.status === 'RECONCILED' ? <div className="po-adjustment-complete" role="status" aria-live="polite"><span><Icon name="check" /></span><h2>Deposit reconciled</h2><p>{adjustments.length ? `Adjustment recorded by ${adjustments.at(-1)?.actor}.` : 'Expected and observed amounts agree.'}</p><Status value="RECONCILED" /></div> : <><h2>No controller action available</h2><p>The immutable source records do not support a settlement adjustment.</p></>}
+          </section>
+        </div>}
       </div>;
     }}</WorkspaceGate>
   );

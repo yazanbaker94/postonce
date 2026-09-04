@@ -15,25 +15,26 @@ async function assertNoPageOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.goto('/case-study');
-  await page.evaluate(() => window.localStorage.clear());
-});
-
 test('controller completes the canonical close and reconciliation journey', async ({ page }, testInfo) => {
   await page.goto('/');
   await expect(page).toHaveURL(/\/app\/close$/);
-  await expect(page.getByRole('heading', { name: 'Daily close' })).toBeVisible();
-  await expect(page.getByText(/2 locations ready · 1 blocked .* 3 open operational exceptions/i)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Friday Close' })).toBeVisible();
+  await expect(page.locator('.po-close-heading').getByText('Northline Motor Group', { exact: true })).toBeVisible();
+  await expect(page.locator('time.po-date-switcher')).toHaveText('Fri, Sep 4, 2026');
   const fordRail = page.locator('.po-close-rail').filter({ hasText: 'Northline Ford' });
-  await expect(fordRail.getByText('24 / 27 verified')).toBeVisible();
+  await expect(fordRail.getByText('27', { exact: true })).toBeVisible();
+  await expect(fordRail.getByText('24', { exact: true })).toBeVisible();
+  await expect(fordRail.getByText('Need review', { exact: true })).toBeVisible();
   await expect(fordRail.getByText('Payout pending')).toBeVisible();
-  await expect(fordRail.getByRole('button', { name: '3 blockers' })).toBeDisabled();
+  const blockedEndpoint = fordRail.getByRole('link', { name: '3 blockers' });
+  await expect(blockedEndpoint).toBeVisible();
+  await expect(blockedEndpoint).toHaveAttribute('href', '/app/exceptions?location=NLF&status=OPEN&sort=newest');
   await capture(page, testInfo, '01-close-initial.png');
   await assertNoPageOverflow(page);
 
-  await fordRail.getByRole('link', { name: /Review exceptions/i }).click();
-  await expect(page.getByRole('heading', { name: 'Open work' })).toBeVisible();
+  await blockedEndpoint.click();
+  await expect(page.getByRole('heading', { name: 'Northline Ford' })).toBeVisible();
+  await expect(page.getByText('3 items blocking close', { exact: true })).toBeVisible();
   const slips = page.locator('.po-work-slip');
   await expect(slips).toHaveCount(3);
   expect(await slips.allTextContents()).toEqual(expect.arrayContaining([
@@ -43,21 +44,26 @@ test('controller completes the canonical close and reconciliation journey', asyn
   ]));
   const ids = await slips.locator('.po-work-slip__meta > span:first-child').allTextContents();
   expect(ids).toEqual(['EX-104', 'EX-105', 'EX-106']);
-  await expect(slips.nth(0).getByText('18 min')).toBeVisible();
-  await expect(slips.nth(1).getByText('37 min')).toBeVisible();
-  await expect(slips.nth(2).getByText('46 min')).toBeVisible();
+  await expect(slips.nth(0).getByText('18 min ago')).toBeVisible();
+  await expect(slips.nth(1).getByText('37 min ago')).toBeVisible();
+  await expect(slips.nth(2).getByText('46 min ago')).toBeVisible();
   await capture(page, testInfo, '02-ford-exceptions.png');
 
   await slips.nth(0).click();
+  await expect(page.getByRole('heading', { name: 'EX-104' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Ambiguous payment match' })).toBeVisible();
+  await expect(page.locator('.po-source-card .po-bench-label')).toHaveText('Payment');
+  await expect(page.locator('.po-candidate-panel .po-bench-label')).toHaveText('Match analysis');
+  await expect(page.locator('.po-selected-card .po-bench-label')).toHaveText('Selected record');
   await expect(page.getByLabel(/RO-8004/)).toBeChecked();
   await expect(page.getByText('Terminal 04')).toBeVisible();
   await expect(page.getByText('J. Patel', { exact: true })).toBeVisible();
-  await page.locator('.po-candidate').filter({ hasText: 'RO-8031' }).click();
+  await page.getByLabel(/RO-8031/).click();
   await expect(page.getByLabel(/RO-8031/)).toBeChecked();
   await expect(page.getByRole('button', { name: /Cannot apply · \$25\.00 over balance/i })).toBeDisabled();
-  await expect(page.getByText(/RO-8031 has \$25\.00 less open balance/i)).toBeVisible();
-  await page.locator('.po-candidate').filter({ hasText: 'RO-8004' }).click();
+  await expect(page.getByText('Balance does not support this payment')).toBeVisible();
+  await expect(page.getByText(/\$25\.00 exceeds the remaining balance/i)).toBeVisible();
+  await page.getByLabel(/RO-8004/).click();
   await expect(page.getByLabel(/RO-8004/)).toBeChecked();
   await capture(page, testInfo, '03-ex104-decision-bench.png');
   await page.getByRole('button', { name: /Apply \$1,125\.00 to RO-8004/i }).click();
@@ -82,7 +88,8 @@ test('controller completes the canonical close and reconciliation journey', asyn
   await page.getByRole('link', { name: 'Close' }).first().click();
   const readyFord = page.locator('.po-close-rail').filter({ hasText: 'Northline Ford' });
   await expect(readyFord.getByText('Ready')).toBeVisible();
-  await expect(readyFord.getByText('27 / 27 verified')).toBeVisible();
+  await expect(readyFord.getByText('27', { exact: true })).toHaveCount(2);
+  await expect(readyFord.getByText('Verified', { exact: true })).toBeVisible();
   await readyFord.getByRole('button', { name: 'Close location' }).click();
   const dialog = page.getByRole('dialog', { name: /Close Northline Ford/i });
   await expect(dialog.getByText('Payout pending')).toBeVisible();
@@ -93,7 +100,9 @@ test('controller completes the canonical close and reconciliation journey', asyn
 
   await expect(page.getByRole('heading', { name: 'Prior settlements requiring attention' })).toBeVisible();
   await page.locator('.po-prior-settlement-row').click();
-  await expect(page.getByRole('heading', { name: 'PAYOUT-9842' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Northline Subaru' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Daily deposit reconciliation' })).toBeVisible();
+  await expect(page.getByText('PAYOUT-9842', { exact: true })).toBeVisible();
   await expect(page.getByText('Variance').last()).toBeVisible();
   await expect(page.getByText('$25.00').last()).toBeVisible();
   await page.evaluate(async () => {
@@ -112,15 +121,20 @@ test('controller completes the canonical close and reconciliation journey', asyn
   await expect(page.getByText('Original expected preserved')).toContainText('$18,742.61');
 
   await page.goto('/app/payments/PAY-1017');
-  await expect(page.getByRole('heading', { name: 'Riley Chen' })).toBeVisible();
+  const paymentAmountHeading = page.getByRole('heading', { name: '1245.00 Canadian dollars' });
+  await expect(paymentAmountHeading).toBeVisible();
+  await expect(paymentAmountHeading).toHaveText('$1,245.00');
+  await expect(page.getByText('Routine payment', { exact: true })).toBeVisible();
+  await expect(page.locator('.po-payment-details').getByText('Riley Chen', { exact: true })).toBeVisible();
   await expect(page.getByText('Captured', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Posted · Verified', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Payout pending', { exact: true }).first()).toBeVisible();
-  const evidence = page.locator('summary').filter({ hasText: 'Evidence · response recovery' });
-  await evidence.click();
-  await expect(page.getByText('One effect, proven across two attempts')).toBeVisible();
-  await expect(page.getByText('Financial mutations')).toBeVisible();
-  await expect(page.locator('.po-proof-result strong')).toHaveText('1');
+  const evidence = page.locator('details.po-payment-evidence');
+  await evidence.locator('summary').click();
+  await expect(evidence).toHaveAttribute('open', '');
+  await expect(evidence.locator('.po-proof-table')).toBeVisible();
+  await expect(evidence.getByText('Financial mutations')).toBeVisible();
+  await expect(evidence.locator('.po-proof-table__result strong')).toHaveText('1');
   await page.locator('.po-state-ribbon').evaluate(async (element) => {
     const top = element.getBoundingClientRect().top + window.scrollY;
     const root = document.documentElement;
@@ -133,7 +147,7 @@ test('controller completes the canonical close and reconciliation journey', asyn
   await capture(page, testInfo, '04-pay1017-evidence.png');
 
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Riley Chen' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '1245.00 Canadian dollars' })).toBeVisible();
   await page.goto('/app/close');
   await expect(page.locator('.po-close-rail').filter({ hasText: 'Northline Ford' }).getByText('Closed by Maya Chen')).toBeVisible();
 
@@ -179,48 +193,41 @@ test('controller completes the canonical close and reconciliation journey', asyn
   await assertNoPageOverflow(page);
 });
 
-test('case-study geometry and product shell remain usable at narrow widths', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto('/case-study');
-  await expect(page.getByRole('heading', { name: /Every payment posts once/i })).toBeVisible();
-  const measuredSections = await page.locator('body').evaluate(() => {
-    const selectors = ['.home-header', '.home-hero', '.home-state-strip', '.home-flow', '.home-control-plane', '.home-evidence', '.home-control-room', '.home-final-cta', '.home-footer'];
-    return selectors.map((selector) => {
-      const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
-      return { selector, top: rect.top + window.scrollY, height: rect.height };
-    });
-  });
-  const approvedGeometry = [
-    ['.home-header', 0, 118], ['.home-hero', 118, 842], ['.home-state-strip', 960, 190],
-    ['.home-flow', 1150, 570], ['.home-control-plane', 1720, 619], ['.home-evidence', 2339, 581],
-    ['.home-control-room', 2920, 726], ['.home-final-cta', 3646, 209], ['.home-footer', 3855, 378],
-  ] as const;
-  for (const [index, [selector, top, height]] of approvedGeometry.entries()) {
-    expect(measuredSections[index]?.selector).toBe(selector);
-    expect(measuredSections[index]?.top).toBeCloseTo(top, 0);
-    expect(measuredSections[index]?.height).toBeCloseTo(height, 0);
-  }
-  expect(await page.locator('img[src*="control-room-dashboard"]').count()).toBe(0);
-
-  for (const width of [900, 801]) {
+test('product shell remains usable at narrow widths', async ({ page }) => {
+  for (const width of [1240, 1181, 1000, 901, 801]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/app/deposits');
-    await expect(page.getByRole('heading', { name: 'Deposits' })).toBeVisible();
+    await page.goto('/app/exceptions');
+    await expect(page.getByRole('heading', { name: 'Northline Ford' })).toBeVisible();
     await assertNoPageOverflow(page);
+    await page.goto('/app/exceptions/EX-104');
+    await expect(page.getByRole('heading', { name: 'Ambiguous payment match' })).toBeVisible();
+    await assertNoPageOverflow(page);
+    await page.goto('/app/payments/PAY-1017');
+    await expect(page.getByRole('heading', { name: '1245.00 Canadian dollars' })).toBeVisible();
+    await page.locator('details.po-payment-evidence summary').click();
+    await assertNoPageOverflow(page);
+    await page.goto('/app/deposits/payout_9842');
+    await expect(page.getByRole('heading', { name: 'Daily deposit reconciliation' })).toBeVisible();
+    await expect(page.locator('time.po-deposit-date')).toHaveText('Thu, Sep 3, 2026');
+    await assertNoPageOverflow(page);
+    if (width === 1240) {
+      await page.goto('/app/deposits/payout_pending_nlt');
+      await expect(page.locator('time.po-deposit-date')).toHaveText('Fri, Sep 4, 2026');
+      await assertNoPageOverflow(page);
+    }
+    await expect(page.locator('.po-mobile-nav')).toBeVisible();
+    await page.getByRole('button', { name: 'More' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Reset workspace' })).toBeVisible();
+    await page.getByRole('button', { name: 'More' }).click();
   }
 
   for (const width of [390, 360]) {
     await page.setViewportSize({ width, height: 844 });
-    await page.goto('/case-study');
-    await expect(page.locator('.home-hero h1')).toBeVisible();
-    await assertNoPageOverflow(page);
-    if (testInfo.project.name === 'screenshots' && width === 390) await page.screenshot({ path: resolve(screenshotDir, 'landing-mobile-viewport.png') });
-
     await page.goto('/app/close');
-    await expect(page.getByRole('heading', { name: 'Daily close' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Friday Close' })).toBeVisible();
     await assertNoPageOverflow(page);
     await page.getByRole('link', { name: 'Exceptions' }).first().click();
-    await expect(page.getByRole('heading', { name: 'Open work' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Northline Ford' })).toBeVisible();
     await assertNoPageOverflow(page);
     await page.getByRole('button', { name: 'More' }).click();
     await page.getByRole('menuitem', { name: 'Integrations' }).click();

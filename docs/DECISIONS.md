@@ -2,7 +2,7 @@
 
 ## Product-first public entry
 
-The primary origin is the product's front door, so `/` resolves directly to `/app/close` and opens the operational workspace. The explanatory presentation remains available at `/case-study`, and the architecture evidence remains at `/architecture`. This resolves the earlier handoff tension between preserving a marketing root and requiring first-time visitors to land directly on Close in favor of the working product experience.
+The primary origin is the product's front door, so `/` resolves directly to `/app/close` and opens the operational workspace. The architecture evidence remains available at `/architecture`; there is no parallel marketing surface competing with the working product experience.
 
 ## Exception-first operator experience
 

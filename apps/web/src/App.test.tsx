@@ -51,28 +51,30 @@ describe('PostOnce product experience', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ sessionId, sessionHeader: 'X-Demo-Session', state }), { status: 201 })));
     render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
 
-    expect(await screen.findByRole('heading', { name: 'Daily close' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Friday Close' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: /Every payment posts once/i })).toBeNull();
   });
 
-  it('keeps the case study available as a secondary route', () => {
+  it('routes retired public paths into the product workspace', async () => {
+    const state = workspaceFixture();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ sessionId, sessionHeader: 'X-Demo-Session', state }), { status: 201 })));
     render(<MemoryRouter initialEntries={['/case-study']}><App /></MemoryRouter>);
-    expect(screen.getByRole('heading', { name: /Every payment posts once/i })).toBeTruthy();
-    const closeLinks = screen.getAllByRole('link', { name: /Run the close/i });
-    expect(closeLinks.length).toBeGreaterThan(0);
-    expect(closeLinks.every((link) => link.getAttribute('href') === '/app/close')).toBe(true);
-    expect(screen.getAllByText(/independent engineering case study/i).length).toBeGreaterThan(0);
+
+    expect(await screen.findByRole('heading', { name: 'Friday Close' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: /Every payment posts once/i })).toBeNull();
   });
 
   it('boots an isolated workspace and renders operational close apart from settlement', async () => {
     const state = workspaceFixture();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ sessionId, sessionHeader: 'X-Demo-Session', state }), { status: 201 })));
     render(<MemoryRouter initialEntries={['/app/close']}><App /></MemoryRouter>);
-    expect(await screen.findByRole('heading', { name: 'Daily close' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Friday Close' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Northline Ford' })).toBeTruthy();
-    expect(screen.getAllByText('3 blocking').length).toBeGreaterThan(0);
+    const blockedEndpoint = screen.getByRole('link', { name: '3 blockers' });
+    expect(blockedEndpoint.getAttribute('href')).toBe('/app/exceptions?location=NLF&status=OPEN&sort=newest');
+    expect(screen.getByText('3 items')).toBeTruthy();
     expect(screen.getAllByText('Payout pending').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Independent from close readiness').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Independent').length).toBe(4);
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search workspace' }));
   });
@@ -92,9 +94,8 @@ describe('PostOnce product experience', () => {
       .mockRejectedValueOnce(new TypeError('offline'));
     vi.stubGlobal('fetch', fetchMock);
     render(<MemoryRouter initialEntries={['/app/close']}><App /></MemoryRouter>);
-    expect(await screen.findByRole('heading', { name: 'Daily close' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Friday Close' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /Maya Chen/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Reset workspace' }));
 
     expect(await screen.findByRole('heading', { name: 'Workspace unavailable' })).toBeTruthy();

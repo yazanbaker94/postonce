@@ -47,7 +47,7 @@ PostgreSQL-backed tests are the authority for locking, unique constraints, and p
 Component tests verify that:
 
 - the root entry resolves directly into the `/app/close` product workspace;
-- the project presentation remains available only at `/case-study`;
+- retired and unknown public paths resolve into the product workspace;
 - the product boots from the workspace service rather than a browser-mutated fixture;
 - the close board separates operational readiness from settlement status;
 - the six desktop navigation areas and responsive mobile navigation remain reachable;
