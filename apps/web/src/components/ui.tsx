@@ -32,7 +32,7 @@ export function SiteHeader() {
       <nav className="site-nav" aria-label="Primary navigation">
         <NavLink to="/" end>Case study</NavLink>
         <NavLink to="/architecture">Architecture</NavLink>
-        <Link to="/demo" className="button button--small button--ink">Open live demo <Arrow /></Link>
+        <Link to="/app/close" className="button button--small button--ink">Open workspace <Arrow /></Link>
       </nav>
     </header>
   );
@@ -47,7 +47,7 @@ export function SiteFooter() {
         <p>Not affiliated with a dealership, DMS, processor, bank, or target employer. No real payment data.</p>
       </div>
       <div className="site-footer__links">
-        <Link to="/demo">Run the close</Link>
+        <Link to="/app/close">Run the close</Link>
         <Link to="/architecture">Technical evidence</Link>
         <a href="https://github.com/yazanbaker94/postonce" target="_blank" rel="noreferrer">Source ↗</a>
       </div>

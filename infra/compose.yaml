@@ -8,7 +8,9 @@ x-postonce-logging: &postonce-logging
 
 services:
   db:
-    image: postgres:17.11-alpine
+    # Pin the multi-platform OCI index. The reviewed VPS selects linux/amd64,
+    # and a later tag move cannot silently change a release or rollback.
+    image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-postonce}

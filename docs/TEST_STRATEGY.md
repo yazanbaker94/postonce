@@ -1,54 +1,133 @@
 # Test strategy
 
-The test suite is organized around financial invariants and recovery behavior rather than maximizing a line-coverage number.
+PostOnce tests financial invariants, operator outcomes, persistence, and recovery behavior. Line coverage alone is not evidence that a close or reconciliation is safe.
 
-## Domain tests
+All fixtures are deterministic and synthetic. Tests must never depend on real customer, cardholder, vehicle, dealership, DMS, processor, bank, or credential data.
 
-- exact-reference matches allocate the intended invoice;
-- ambiguous candidates never create an automatic allocation;
-- allocations cannot exceed payment remainder or invoice balance;
-- all reconciliation arithmetic uses integer cents;
-- a close cannot become ready while a blocking exception remains;
-- a one-cent or otherwise partial whole-payment resolution is rejected without mutation;
-- reusing another allocation's operation key is rejected without mutation;
-- repeated chapter commands return the original result.
+## Fast domain and contract tests
+
+The domain layer should prove:
+
+- the canonical fixture has three locations and 62 Friday payments;
+- Ford begins with exactly `EX-104`, `EX-105`, and `EX-106` open;
+- match, refund-link, and split-tender decisions create the correct record type;
+- an exception clears only after its DMS effect is verified;
+- resolving each Ford exception decreases its blocker count exactly once;
+- Ford becomes `READY` at 27 of 27 verified postings and zero blockers;
+- current-day `PAYOUT_PENDING` does not prevent operational readiness or close;
+- a close records one immutable attestation and an identical replay returns it;
+- the Subaru −$25.00 adjustment preserves the original expected amount and produces zero variance;
+- allocation, currency, location, department, record-type, and evidence constraints reject invalid input without partial mutation;
+- changed payload under a used idempotency key is rejected;
+- integer minor-unit arithmetic is exact.
+
+Shared Zod schemas validate the API boundary and the complete `WorkspaceState` returned after every mutation.
 
 ## Repository and API tests
 
-- the same processor external event can be delivered twice but creates one payment;
-- the same idempotency key with a different payload is rejected;
-- allocation and outbound intent commit together;
-- a response lost after destination commit is recovered with the same key;
-- the lost-response trace contains one failed observation and one safe replay, not a synthetic extra attempt;
-- paired resolution commands at one version produce one success and one conflict;
-- an independently supplied nonzero bank variance keeps the close blocked;
-- another demo session cannot read or mutate the caller's records;
-- errors are sanitized and include a traceable correlation ID;
-- session reset affects only the current run.
+The HTTP and repository suites cover:
 
-PostgreSQL-backed tests verify database uniqueness and serialized `SELECT ... FOR UPDATE` behavior. In-memory repository tests provide fast feedback but are not accepted as sole evidence for concurrency or persistence claims.
+- isolated workspace creation, load, and reset;
+- required/valid `X-Demo-Session` handling;
+- the Close, Exceptions, Payments, Deposits, Activity, Integrations, Search, and evidence read routes;
+- one success and one `409 VERSION_CONFLICT` for simultaneous commands against the same version;
+- PostgreSQL serialization with `SELECT ... FOR UPDATE`;
+- exact command replay and changed-payload collision behavior;
+- normalized persistence of close attestations, refund links, payout source records, adjustments, integrations, and command receipts;
+- processor duplicate delivery producing one payment mutation;
+- recovery from a lost DMS response with the original operation key;
+- sanitized error and evidence envelopes;
+- create/mutation rate limits, session expiry/cap behavior, and forged-forwarding-header rejection;
+- no cross-workspace read or mutation.
+
+PostgreSQL-backed tests are the authority for locking, unique constraints, and persistence. In-memory tests provide fast feedback but are not accepted as the only evidence for concurrency or durability.
 
 ## Interface tests
 
-- a reviewer can start or resume an isolated run;
-- chapter actions change the visible evidence and cannot be double-triggered;
-- duplicate, lost-response, conflict, and reconciliation results are explained in plain language;
-- the evidence drawer is keyboard accessible and restores focus;
-- API failure switches to an explicitly read-only preview;
-- responsive layouts preserve the close equation and chapter order;
-- reduced-motion preference disables nonessential transitions.
+Component tests verify that:
 
-## Production smoke checks
+- the case-study entry routes into `/app/close`;
+- the product boots from the workspace service rather than a browser-mutated fixture;
+- the close board separates operational readiness from settlement status;
+- the six desktop navigation areas and responsive mobile navigation remain reachable;
+- an unavailable service leaves financial actions disabled and presents retry state;
+- version conflicts reload and explain the winning record;
+- evidence disclosure and confirmation controls are keyboard accessible;
+- narrow layouts do not clip tables, decision cards, or primary actions.
 
-After deployment:
+## Browser journey
 
-1. fetch `/health` and `/api/health` through the public TLS origin;
-2. create a new demo session;
-3. execute every chapter and assert the expected delivery/mutation counters, zero settlement variance, and passing evidence checks;
-4. refresh and confirm the session state survives;
-5. create a second session and confirm the runs differ;
-6. capture desktop and narrow-viewport screenshots;
-7. inspect the browser console and failed network requests;
-8. verify the public repository and live URLs from a clean context.
+The Playwright journey follows the same path an operator does:
 
-No production smoke check uses real payment or customer data.
+1. create or reset an isolated workspace at `/app/close`;
+2. confirm Toyota and Subaru are ready while Ford has three blockers;
+3. resolve `EX-104` to `RO-8004` and observe verified completion;
+4. link `EX-105` to the original `P-18401` payment;
+5. complete the `EX-106` split tender on `RO-8018`;
+6. confirm Ford becomes ready, then close it and inspect the attestation;
+7. record the source-supported adjustment on `PAYOUT-9842`;
+8. confirm adjusted expected and observed deposit are $18,717.61 with zero variance;
+9. refresh and confirm state survives;
+10. create another workspace and confirm isolation;
+11. inspect console errors, failed requests, and desktop/narrow layout overflow.
+
+Browser tests use the implemented business endpoints and never depend on scripted action state.
+
+## Local commands
+
+Install the locked dependency graph:
+
+```bash
+npm ci
+```
+
+Run the default repository gate:
+
+```bash
+npm run check
+```
+
+This runs workspace type checks, tests, and production builds. Focused commands are:
+
+```bash
+npm run typecheck
+npm run test
+npm run build
+npm run test --workspace @postonce/api
+npm run test --workspace @postonce/web
+```
+
+To include the PostgreSQL repository test, start PostgreSQL, apply migrations, and expose the test URL before running the API suite:
+
+```powershell
+$env:DATABASE_URL = "postgresql://postonce:postonce_dev@127.0.0.1:5432/postonce"
+$env:POSTONCE_TEST_DATABASE_URL = $env:DATABASE_URL
+$env:DEMO_STORE = "postgres"
+npm run migrate --workspace @postonce/api
+npm run test --workspace @postonce/api
+```
+
+Install Chromium once, then run the CI-equivalent gate:
+
+```bash
+npx playwright install chromium
+npm run verify
+```
+
+`verify` runs `check` and the product browser suite. CI also provisions PostgreSQL 17, exports both database URLs, applies migrations, and installs Chromium with system dependencies.
+
+## Production verification
+
+After deployment, verify the product contract instead of a scripted failure runner:
+
+1. fetch `/`, `/healthz`, and `/api/health` through the public TLS origin;
+2. assert health reports PostgreSQL persistence and synthetic-only data;
+3. create a workspace and load `/api/workspace` with its session header;
+4. execute the three Ford resolution commands, close Ford, and record the Subaru adjustment;
+5. assert verified posting counts, immutable attestation, preserved original payout, and zero adjusted variance;
+6. replay accepted commands and confirm no counts or evidence duplicate;
+7. refresh and confirm persistence, then create a second workspace and confirm isolation;
+8. test desktop and supported narrow viewports with no console/network failures;
+9. confirm the sibling AudioFetcher public health and release identity are unchanged.
+
+Production verification uses only the synthetic fixture and must not create real payment or customer data.

@@ -23,7 +23,7 @@ if [ "$deploy_root" != /opt/postonce ] || [ "$origin_port" != 18044 ]; then
   exit 1
 fi
 
-for command_name in awk caddy cat df dirname docker flock grep id openssl readlink realpath ss stat systemctl tar; do
+for command_name in awk caddy cat df dirname docker find flock grep id journalctl openssl ps readlink realpath sort ss stat systemctl tar; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf '%s\n' "Missing required command: $command_name" >&2
     exit 1
@@ -40,6 +40,16 @@ if ! docker compose up --help | grep -q -- '--wait'; then
 fi
 systemctl is-active --quiet docker
 systemctl is-active --quiet caddy
+
+# PostOnce shares this host with AudioFetcher. Refuse a release while any of its
+# production units are down; a PostOnce deployment must never become an
+# accidental recovery operation for the primary workload.
+for protected_service in ytmp3-api@8080.service ytmp3-api@8081.service ytmp3-pot.service; do
+  if ! systemctl is-active --quiet "$protected_service"; then
+    printf '%s\n' "Protected shared-host service is not active: $protected_service" >&2
+    exit 1
+  fi
+done
 
 if [ -n "$host_caddy_env_file" ]; then
   if [ ! -f "$host_caddy_env_file" ] || [ -L "$host_caddy_env_file" ] || \
@@ -164,9 +174,13 @@ else
   printf '%s\n' "Loopback origin port 18044 is available."
 fi
 
-available_kib=$(df -Pk /opt | awk 'NR == 2 {print $4}')
-if [ "${available_kib:-0}" -lt 5242880 ]; then
-  printf '%s\n' "At least 5 GiB free below /opt is required." >&2
+# AudioFetcher maintains a 12 GiB free-space target for conversion headroom.
+# Measure bytes directly so filesystem block-size differences cannot weaken the
+# gate. PostOnce images are built remotely and only pulled after this check.
+available_bytes=$(df -PB1 /opt | awk 'NR == 2 {print $4}')
+minimum_available_bytes=12884901888
+if [ "${available_bytes:-0}" -lt "$minimum_available_bytes" ]; then
+  printf '%s\n' "At least 12 GiB free below /opt is required before a PostOnce release." >&2
   exit 1
 fi
 memory_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
@@ -174,6 +188,51 @@ if [ "${memory_kib:-0}" -lt 2097152 ]; then
   printf '%s\n' "At least 2 GiB RAM is required." >&2
   exit 1
 fi
+available_memory_kib=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+if [ "${available_memory_kib:-0}" -lt 786432 ]; then
+  printf '%s\n' "At least 768 MiB currently available RAM is required before deployment." >&2
+  exit 1
+fi
+
+# Avoid stacking a release on top of a memory-heavy server-side build. The
+# production image build belongs in GitHub Actions, and sibling-project builds
+# must finish before the lightweight pull/restart phase begins.
+active_builds=$(ps -eo comm=,args= | awk '
+  ($1 == "docker" && $0 ~ / (build|buildx[[:space:]]+build)([[:space:]]|$)/) ||
+  ($1 == "docker-compose" && $0 ~ /--build([[:space:]]|$)/) ||
+  ($0 ~ /(^|[[:space:]\/])next([[:space:]]+build|-build)([[:space:]]|$)/) {
+    print
+  }
+')
+if [ -n "$active_builds" ]; then
+  printf '%s\n' "A server-side application build is active; wait for it to finish before deploying PostOnce." >&2
+  exit 1
+fi
+
+if journalctl -k --since '15 minutes ago' --no-pager 2>/dev/null | \
+  grep -Eqi 'out of memory|oom-kill|killed process'; then
+  printf '%s\n' "The host recorded an OOM event in the last 15 minutes; wait for memory pressure to settle." >&2
+  exit 1
+fi
+
+if [ -r /proc/pressure/memory ]; then
+  memory_pressure_avg10=$(awk '
+    /^some / {
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^avg10=/) {
+          sub(/^avg10=/, "", $i)
+          print $i
+          exit
+        }
+      }
+    }
+  ' /proc/pressure/memory)
+  if awk -v pressure="${memory_pressure_avg10:-0}" 'BEGIN { exit !(pressure > 5.0) }'; then
+    printf '%s\n' "Current memory pressure is too high for a shared-host deployment." >&2
+    exit 1
+  fi
+fi
 
 printf '%s\n' "PostOnce VPS preflight passed without changes."
+printf '%s\n' "Capacity snapshot: $available_bytes bytes free below /opt; $available_memory_kib KiB RAM available."
 printf '%s\n' "Managed boundary: /opt/postonce, Compose project postonce, loopback port 18044, one Caddy site drop-in."

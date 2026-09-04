@@ -31,6 +31,10 @@ export class MemoryDemoRepository implements DemoRepository {
 
   async get(sessionId: string): Promise<DemoState | null> {
     const state = this.sessions.get(sessionId);
+    if (state && this.isExpired(state)) {
+      this.sessions.delete(sessionId);
+      return null;
+    }
     return state ? clone(state) : null;
   }
 
@@ -38,6 +42,10 @@ export class MemoryDemoRepository implements DemoRepository {
     return this.exclusive(sessionId, async () => {
       const current = this.sessions.get(sessionId);
       if (!current) return null;
+      if (this.isExpired(current)) {
+        this.sessions.delete(sessionId);
+        return null;
+      }
 
       const candidate = clone(current);
       const result: MutationResult<T> = await mutation(candidate);
@@ -86,15 +94,18 @@ export class MemoryDemoRepository implements DemoRepository {
   }
 
   private pruneExpiredAndBounded(): void {
-    const cutoff = Date.now() - this.sessionTtlMinutes * 60_000;
     for (const [sessionId, state] of this.sessions) {
-      const lastTouched = new Date(state.metadata.generatedAt).getTime();
-      if (lastTouched < cutoff) this.sessions.delete(sessionId);
+      if (this.isExpired(state)) this.sessions.delete(sessionId);
     }
     if (this.sessions.size < this.maxActiveSessions) return;
     const oldest = [...this.sessions.entries()]
       .sort((left, right) => new Date(left[1].metadata.generatedAt).getTime() - new Date(right[1].metadata.generatedAt).getTime());
     const toRemove = this.sessions.size - this.maxActiveSessions + 1;
     for (const [sessionId] of oldest.slice(0, toRemove)) this.sessions.delete(sessionId);
+  }
+
+  private isExpired(state: DemoState): boolean {
+    const lastTouched = new Date(state.metadata.generatedAt).getTime();
+    return !Number.isFinite(lastTouched) || lastTouched < Date.now() - this.sessionTtlMinutes * 60_000;
   }
 }

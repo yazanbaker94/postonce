@@ -14,13 +14,23 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  ...(externalBaseUrl ? {} : { webServer: {
+  ...(externalBaseUrl ? {} : { webServer: [
+    {
+      command: 'npm run serve:api:e2e',
+      url: 'http://127.0.0.1:3001/health',
+      reuseExistingServer: true,
+      timeout: 120_000,
+      env: { DEMO_SESSION_CREATE_LIMIT: '100' },
+    },
+    {
       command: 'npm run serve:e2e',
       url: 'http://127.0.0.1:4273',
       reuseExistingServer: true,
-    } }),
+    },
+  ] }),
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } } },
-    { name: 'screenshots', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1536, height: 1024 } } },
+    { name: 'mobile', use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 } } },
+    { name: 'screenshots', use: { ...devices['Desktop Chrome'], viewport: { width: 1536, height: 1024 } } },
   ],
 });

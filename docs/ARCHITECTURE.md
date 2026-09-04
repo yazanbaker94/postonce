@@ -2,69 +2,110 @@
 
 ## System boundary
 
-PostOnce demonstrates the coordination layer between three fictional systems. `LegacyDMS` owns repair-order invoices, `Northstar Processor` reports customer payments and settlement fees, and `Prairie Bank` reports the eventual deposit. PostOnce does not authorize a card, hold funds, or replace any of those systems.
+PostOnce is the coordination and evidence layer between three fictional external systems:
+
+- Northstar Processor reports customer payments and processor payout data;
+- LegacyDMS owns repair orders, parts tickets, deals, and the accepted posting result;
+- Prairie Bank reports observed deposits and supporting notices.
+
+PostOnce does not authorize cards, hold funds, replace the DMS, or claim a bank deposit merely because a posting request succeeded. The adapters are deterministic simulators inside this synthetic product boundary.
 
 ```mermaid
 flowchart LR
-    Processor[Northstar Processor\nsynthetic webhook] -->|at-least-once event| API[NestJS API\ncommands + invariants]
-    DMS[LegacyDMS\nsynthetic invoices] -->|invoice snapshot| API
-    API -->|stable operation key| DMS
-    Bank[Prairie Bank\nsynthetic settlement] -->|deposit record| API
-    API <--> PG[(PostgreSQL\nledger + inbox + outbox)]
-    API --> Web[React/Vite\nclose run + evidence]
+    Processor[Northstar Processor\nsynthetic events] -->|at-least-once input| API[NestJS API\ncommands + invariants]
+    DMS[LegacyDMS\nsynthetic records] -->|record snapshot| API
+    API -->|stable operation identity| DMS
+    Bank[Prairie Bank\nsynthetic deposit evidence] --> API
+    API <--> PG[(PostgreSQL\nworkspace + relational evidence)]
+    API --> Web[React/Vite\noperator workspace]
 ```
 
-The simulators are inside the demo boundary and deterministic. They exercise the same request, response, retry, and failure contracts an external adapter would use without implying access to a proprietary API.
+The product exposes the same business concepts through Close, Exceptions, Payments, Deposits, Activity, and Integrations. Technical evidence is attached to the payment or payout it explains rather than organized as a separate simulation workflow.
+
+## State model
+
+PostOnce deliberately has two timelines.
+
+### Operational close
+
+Each location owns an `OperationalClose` for one business date. Its readiness derives from:
+
+- the number of in-scope payments;
+- the number with a verified dealership-system effect;
+- the number of open blocking operational exceptions.
+
+A location can move from `BLOCKED` to `READY` only when verified postings equal in-scope payments and blockers equal zero. `CLOSED` adds an immutable attestation containing the operator, time, date, counts, and version. Current-day payout status is displayed in the close projection but does not participate in that readiness rule.
+
+### Payout reconciliation
+
+A `ProcessorPayout` tracks processor components, the observed bank deposit, preserved source records, append-only adjustments, and variance. Its lifecycle includes `PAYOUT_PENDING`, `VARIANCE`, and `RECONCILED`. A payout is reconciled only at zero variance.
+
+This timeline may lag the operational day. A pending current-day payout or prior-day variance never changes an otherwise valid location close.
 
 ## Command path
 
-Every state-changing action follows the same shape:
+The implemented write surface has three commands:
 
-1. validate the command at the HTTP boundary;
-2. bind it to an isolated demo session and correlation ID;
-3. begin a database transaction;
-4. lock or version-check the relevant aggregate;
-5. enforce domain invariants using integer cents;
-6. append the domain event and any outbox work in the same transaction;
-7. commit;
-8. return a read model that explains what changed and what did not.
+1. resolve an exception;
+2. close a location;
+3. record a supported settlement adjustment.
 
-No real network call occurs. For deterministic public replay, the synthetic destination adapter and its attempt evidence execute inside the session transaction. Allocation and outbound intent still commit atomically, but this bounded implementation does not claim process-crash recovery between a database commit and an independent relay. A production extension would drain the same outbox contract after commit from a leased background worker.
+Every command follows the same boundary:
 
-## Inbox: repeated input without repeated state
+1. validate the JSON payload with the shared Zod contract;
+2. bind the request to an isolated workspace and correlation ID;
+3. enforce the session mutation window;
+4. lock or version-check the persisted workspace;
+5. enforce currency, amount, relationship, state, and evidence invariants;
+6. append the accepted domain/evidence records;
+7. persist the new snapshot and normalized projections in one transaction;
+8. return the complete current workspace state.
 
-Processor transport is treated as at least once. A unique key on `(session_id, provider, external_event_id)` identifies the logical message. The first delivery records the inbox item, payment, audit event, and any matching work atomically. A repeated delivery records observable attempt evidence but returns the already-created result.
+The client never assumes a financial write succeeded from a click alone. It renders the state returned by the service.
 
-The distinction is important: duplicate **delivery** is expected; duplicate **financial mutation** is not.
+## Exception resolution
+
+An exception contains a monotonically increasing version and a bounded candidate set. A command identifies the version the operator saw, a stable idempotency key, and the chosen target.
+
+The engine has distinct mutation paths for:
+
+- payment-to-record allocation;
+- refund-to-original-payment linking;
+- the remaining allocation of a split tender.
+
+It rejects targets outside the offered candidates, cross-location or cross-department links, excessive allocations, invalid record types, and reuse of an operation key for a different payload. The accepted local mutation and posting intent share a transaction. The synthetic DMS result is then verified before the exception becomes resolved and the location close is recalculated.
+
+## Inbox: repeat delivery without repeat money
+
+Processor transport is treated as at least once. A unique `(session_id, provider, external_event_id)` identity represents the logical input. A repeated delivery can add attempt evidence and increase its delivery count, but it returns the already-associated payment instead of creating another financial mutation.
+
+`PAY-1006` is seeded as a recovered example. The operator can inspect it through Payments, Activity, or Integrations; there is no duplicate-event button.
 
 ```mermaid
 sequenceDiagram
     participant P as Processor simulator
     participant A as PostOnce API
     participant DB as PostgreSQL
-    P->>A: event EVT-104 (attempt 1)
-    A->>DB: insert inbox + payment + audit
-    DB-->>A: committed PAY-104
-    A-->>P: 202 accepted
-    P->>A: event EVT-104 (attempt 2)
-    A->>DB: lookup unique inbox key
-    DB-->>A: existing PAY-104
-    A-->>P: 200 replayed, no mutation
+    P->>A: payment event (delivery 1)
+    A->>DB: inbox identity + payment + audit
+    DB-->>A: payment committed
+    P->>A: same event (delivery 2)
+    A->>DB: lookup unique inbox identity
+    DB-->>A: existing payment
+    A-->>P: replayed result; no second mutation
 ```
 
-## Outbox: atomic intent and deterministic delivery evidence
+## Outbox and DMS verification
 
-Allocation and the intent to post it to LegacyDMS are persisted together. The guided action then invokes a pure, synthetic adapter and records the resulting attempts in the same serialized session mutation. This proves the operation identity, retry rules, and evidence model without pretending an external system was called.
+An accepted allocation or refund link and its outbound posting intent are persisted together. Every DMS attempt carries a stable operation key. If the destination commits but the response disappears, retrying with that same key finds the first effect rather than writing again.
 
-For the lost-response chapter, LegacyDMS commits operation `OP-7Q3K` and the simulator discards the first HTTP response. The retry uses the original destination idempotency key. The destination returns the first result instead of posting again.
+`PAY-1017` is seeded with exactly that evidence: one response-lost observation, one safe replay, and one financial mutation. Its payment detail presents this as an evidence seam after the system has recovered.
 
-PostOnce therefore promises **at-least-once transport and idempotent mutation**, not exactly-once delivery.
+PostOnce promises **at-least-once transport with idempotent domain mutation**, not exactly-once network delivery. The current bounded implementation records deterministic adapter evidence in the serialized workspace mutation. A production adapter would drain the persisted outbox after commit from a leased worker and resume expired claims after a process failure; that worker is not part of this repository's runtime claim.
 
-The repository deliberately leaves a separate relay process outside the implemented scope. A production version would claim pending outbox rows with a lease after the transaction commits, persist destination receipts independently, and allow another worker to resume an expired claim. That architecture is described as a next step, not as evidence from this build.
+## Concurrency and replay
 
-## Concurrent exception decisions
-
-An exception includes a monotonically increasing `version`. A decision command carries the version the reviewer saw. PostgreSQL locks the session aggregate before the engine compares that expected version with the persisted one. Two concurrent commands can be submitted, but the second waits, then observes the winning version and returns `409` rather than overwriting it:
+The PostgreSQL repository locks the workspace aggregate before applying a mutation:
 
 ```sql
 SELECT state
@@ -73,39 +114,58 @@ WHERE id = $1
 FOR UPDATE;
 ```
 
-The accepted mutation, aggregate snapshot, normalized exception/allocation rows, and audit evidence are projected within that transaction. A stale version produces `409 VERSION_CONFLICT` with the winning decision and cannot allocate the payment a second time. The public guided action deterministically preserves both outcomes as explanatory evidence. In the raw concurrent endpoint test, the rejected transaction rolls back and returns the winner to the caller; persisting rejected-command telemetry outside that transaction would be a production observability extension.
+Two callers may submit commands against the same visible version. The first accepted mutation advances state. The stale caller receives `409 VERSION_CONFLICT` with safe winning context and cannot create a second allocation, refund link, close, or adjustment. Rejected stale-attempt evidence is represented outside the accepted financial mutation.
+
+Accepted commands also write append-only command receipts. An identical replay returns the original result. A changed payload under the same key receives `409 IDEMPOTENCY_KEY_REUSE`.
+
+## Persistence
+
+The repository stores a versioned workspace snapshot for deterministic reads and maintains relational projections for the financial and evidence records, including:
+
+- payments, DMS records, allocations, and refund links;
+- inbox receipts, posting outbox entries, DMS postings, and integration attempts;
+- operational exceptions and audit events;
+- per-location operational closes;
+- processor payouts, settlement source records, and adjustments;
+- synthetic integration connections and command receipts.
+
+Database constraints backstop currency, allowed states, unique identities, close readiness, zero-variance reconciliation, and referential relationships. Append-only triggers protect refund links, settlement adjustments, and product command receipts from update or deletion.
+
+Without `DATABASE_URL`, the API can use an in-memory repository for local development and fast tests. That mode has the same domain engine but is process-local and disposable. Production explicitly sets `DEMO_STORE=postgres`.
 
 ## Financial model
 
-- Money is stored as integer minor units with a three-letter currency.
-- Allocation totals cannot exceed a payment's remaining amount or an invoice's remaining balance.
-- Posted history is append-only. Corrections use compensating or reversing events.
-- A settlement uses the explicit equation `gross - fees - refunds = expected deposit`.
-- A close cannot become `READY` while a blocking exception or variance remains.
-- Advisory explanations never write to the ledger.
+- Money uses integer minor units and an explicit currency.
+- Allocations cannot exceed payment remainder or record balance.
+- Accepted history is corrected with new evidence or compensating records, never silent edits.
+- Payout arithmetic is `captured - refunds - fees + adjustments = adjusted expected`.
+- Variance is `adjusted expected - observed deposit`; `0` is required for `RECONCILED`.
+- No advisory explanation can write financial state.
 
-## Public demo isolation
+## Synthetic workspace isolation
 
-`POST /api/demo/sessions` creates a random session identifier and deterministic scenario rows. The browser sends that identifier in `X-Demo-Session`. Every repository query includes the session boundary. Reset replaces only that run.
+`POST /api/demo/sessions` creates a random workspace identifier and the deterministic fixture. The browser sends that UUID in `X-Demo-Session`; every repository read and mutation is scoped to it. Reset replaces only the caller's workspace.
 
-The header is a convenience for a synthetic public demo, not an authentication design. A production product would bind the same tenant boundary to an authenticated principal, authorize commands by role, and enforce isolation through application policy plus database-level controls.
+The header is isolation for an anonymous synthetic environment, not authentication. A production multi-tenant product would bind the same boundary to an authenticated principal, authorize commands by role, enforce tenant policy at multiple layers, expire sessions, and define audit retention.
 
-Anonymous session admission is bounded at the trusted proxy boundary. The public host overwrites `X-PostOnce-Ingress-Peer` from its actual network peer, the loopback-only gateway strips public client-IP headers, and the API validates and hashes the resulting address before applying the creation window. It does not trust caller-supplied Cloudflare or forwarding headers. Behind Cloudflare this deliberately limits by edge peer rather than claiming authenticated end-user identity.
+Anonymous workspace creation and mutation are bounded. The trusted host proxy overwrites `X-PostOnce-Ingress-Peer` from its actual peer, the loopback gateway strips caller-controlled forwarding identities, and the API hashes the validated address for admission limiting. Behind Cloudflare this groups by edge peer; it does not claim end-user identity.
 
-## Read model and evidence
+## Evidence boundary
 
-The API composes a reviewer snapshot from the persisted domain state. The client does not infer financial outcomes. Evidence objects are deliberately sanitized and bounded; they include method, fictional destination, status, duration, operation key, correlation ID, and small request/response bodies but never secrets or card data.
+Evidence objects are allow-listed and size-bounded. They may include a fictional system, direction, operation, status, duration, stable event/operation key, correlation ID, and small sanitized bodies. They exclude authorization headers, cookies, credentials, environment values, database details, stack traces, and real financial or personal data.
 
-## Deployment topology
+## Shared-VPS deployment
 
-Production uses three containers on private compose networks:
+The production topology has three Compose services:
 
-- PostgreSQL 17 with a persistent volume;
-- the NestJS API, which applies or verifies migrations before serving;
-- a small Caddy gateway serving the compiled web client and proxying same-origin API requests through one loopback-bound origin port.
+- pinned PostgreSQL 17 with a dedicated persistent volume;
+- the NestJS API on a private data network;
+- a Caddy gateway that serves the compiled web client and proxies same-origin API traffic through loopback port `18044`.
 
-The simulator adapters and deterministic relay live inside the API process for this bounded demo; there is no idle background worker container. The public browser calls same-origin `/api`, so the API and UI share a single TLS origin. Health checks gate deployment. The deployment script preserves the prior image and database backup long enough to roll back a failed release.
+GitHub Actions verifies the repository, builds `linux/amd64` API and gateway images, publishes them to GHCR, and writes their immutable digests into a checksummed operations artifact. The shared VPS only pulls those images; it never builds application code.
 
-## Performance evidence
+Deployment is constrained to `/opt/postonce`, Compose project `postonce`, the exact PostOnce containers/networks/volume, port `18044`, and `/etc/caddy/sites/postonce.caddy`. Preflight validates ownership, Caddy's complete configuration, sibling AudioFetcher health, free space, available memory, recent OOM pressure, and the absence of server-side builds. Cleanup and retention target PostOnce resources only; no global Docker prune is used.
 
-The benchmark is deliberately small and reproducible. It compares indexed repair-order lookup with a sequential scan over 50,000 deterministic synthetic invoices and reports average lookup time. Duplicate delivery and concurrent resolution are covered separately by domain, HTTP, and PostgreSQL tests. The benchmark is not a production capacity claim; it demonstrates the algorithmic reason for the selected index.
+A successful release retains the active release plus its immediate predecessor and only their referenced PostOnce image digests. Backups are capped by age and count. A failed first install removes only newly created PostOnce state. Rollback restores a retained application release after a backup, but migrations are not reversed and must remain backward compatible.
+
+The exact boundary, thresholds, operator command, public checks, and rollback command live in [the production operations guide](../infra/README.md).
