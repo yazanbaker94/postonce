@@ -72,7 +72,7 @@ describe('PostOnce product experience', () => {
     expect(screen.getByRole('heading', { name: 'Northline Ford' })).toBeTruthy();
     const blockedEndpoint = screen.getByRole('link', { name: '3 blockers' });
     expect(blockedEndpoint.getAttribute('href')).toBe('/app/exceptions?location=NLF&status=OPEN&sort=newest');
-    expect(screen.getByText('3 items')).toBeTruthy();
+    expect(blockedEndpoint.textContent).toBe('Blocked');
     expect(screen.getAllByText('Payout pending').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Independent').length).toBe(4);
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });

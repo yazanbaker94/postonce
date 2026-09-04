@@ -193,6 +193,64 @@ test('controller completes the canonical close and reconciliation journey', asyn
   await assertNoPageOverflow(page);
 });
 
+test('desktop reference rails keep their terminal actions aligned', async ({ page }) => {
+  await page.setViewportSize({ width: 1536, height: 1024 });
+  await page.goto('/app/close');
+  await expect(page.getByRole('heading', { name: 'Friday Close' })).toBeVisible();
+
+  const closeGeometry = await page.locator('.po-close-rail').first().evaluate((rail) => {
+    const bounds = rail.getBoundingClientRect();
+    const centers = [...rail.querySelectorAll<HTMLElement>('.po-step-icon')].map((node) => {
+      const rect = node.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, width: rect.width };
+    });
+    const terminal = rail.querySelector<HTMLElement>('.po-close-endpoint > i')!.getBoundingClientRect();
+    const chevron = rail.querySelector<SVGElement>('.po-close-endpoint svg')!.getBoundingClientRect();
+    return {
+      height: bounds.height,
+      centers,
+      terminal: { x: terminal.x + terminal.width / 2, y: terminal.y + terminal.height / 2, width: terminal.width },
+      chevronX: chevron.x,
+    };
+  });
+
+  expect(closeGeometry.height).toBeGreaterThanOrEqual(129);
+  expect(closeGeometry.centers.map(({ x }) => Math.round(x))).toEqual([608, 763, 934, 1108]);
+  expect(closeGeometry.centers.every(({ width }) => width === 24)).toBe(true);
+  expect(Math.abs(closeGeometry.centers[0].y - closeGeometry.terminal.y)).toBeLessThan(4);
+  expect(Math.round(closeGeometry.terminal.x)).toBe(1303);
+  expect(closeGeometry.terminal.width).toBe(15);
+  expect(closeGeometry.chevronX).toBeGreaterThan(1477);
+  await expect(page.locator('.po-close-endpoint small')).toHaveCount(0);
+  await assertNoPageOverflow(page);
+
+  await page.goto('/app/exceptions?location=NLF&status=OPEN&sort=newest');
+  await expect(page.getByRole('heading', { name: 'Northline Ford' })).toBeVisible();
+  const exceptionGeometry = await page.locator('.po-work-slip').evaluateAll((rows) => rows.map((row) => {
+    const bounds = row.getBoundingClientRect();
+    const tracks = [...row.children].map((child) => child.getBoundingClientRect().width / bounds.width);
+    const label = row.querySelector<HTMLElement>('.po-work-slip__review > span')!.getBoundingClientRect();
+    const arrow = row.querySelector<SVGElement>('.po-work-slip__review svg')!.getBoundingClientRect();
+    return {
+      top: bounds.top,
+      bottom: bounds.bottom,
+      height: bounds.height,
+      tracks,
+      actionCenterDelta: Math.abs((label.top + label.height / 2) - (arrow.top + arrow.height / 2)),
+    };
+  }));
+
+  expect(exceptionGeometry).toHaveLength(3);
+  expect(exceptionGeometry[0].height).toBeGreaterThanOrEqual(159);
+  expect(exceptionGeometry[1].top - exceptionGeometry[0].bottom).toBeGreaterThanOrEqual(23);
+  [0.185, 0.215, 0.335, 0.13, 0.135].forEach((expectedRatio, index) => {
+    expect(exceptionGeometry[0].tracks[index]).toBeCloseTo(expectedRatio, 2);
+  });
+  expect(exceptionGeometry.every(({ actionCenterDelta }) => actionCenterDelta < 1)).toBe(true);
+  await expect(page.locator('.po-work-slip__review small')).toHaveCount(0);
+  await assertNoPageOverflow(page);
+});
+
 test('product shell remains usable at narrow widths', async ({ page }) => {
   for (const width of [1240, 1181, 1000, 901, 801]) {
     await page.setViewportSize({ width, height: 900 });

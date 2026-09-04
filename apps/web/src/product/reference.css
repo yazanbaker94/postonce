@@ -512,10 +512,12 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--po-line);
   box-shadow: inset 3px 0 var(--po-red);
-  background: rgba(255, 240, 237, .42);
+  background: rgba(255, 240, 237, .16);
   font-size: 13px;
 }
 .po-prior-settlement-row > div { display: flex; align-items: flex-start; flex-direction: column; gap: 3px; }
+.po-prior-settlement-row > span:nth-of-type(2) { display: flex; flex-direction: column; gap: 3px; color: var(--po-muted); }
+.po-prior-settlement-row > span:nth-of-type(2) .po-money { color: var(--po-red); font-weight: 650; }
 .po-prior-settlement-row time,
 .po-prior-settlement-row small { color: var(--po-muted); font-size: 12px; }
 .po-prior-settlement-row > b { font-size: 13px; }
@@ -586,8 +588,8 @@
 .po-filter-menu .po-filterbar select { width: 100%; min-width: 0; font-size: 13px; }
 .po-work-slips { border-top: 0; }
 .po-work-slip {
-  grid-template-columns: 145px 235px minmax(280px, 1fr) 130px 105px;
-  min-height: 140px;
+  grid-template-columns: 18.5% 21.5% minmax(0, 1fr) 13% 13.5%;
+  min-height: 160px;
   border-right: 0;
   border-bottom: 1px solid var(--po-line);
   border-left: 3px solid var(--po-amber);
@@ -628,10 +630,84 @@
 .po-work-slip__age svg { width: 17px; color: #7890ad; }
 .po-work-slip__age strong { color: var(--po-ink); font: 650 14px/1 var(--po-sans); }
 .po-work-slip__age strong { white-space: nowrap; }
-.po-work-slip__review { align-items: flex-end; gap: 8px; color: var(--po-blue); }
+.po-work-slip__review {
+  align-items: center;
+  flex-direction: row !important;
+  justify-content: flex-end !important;
+  gap: 14px;
+  color: var(--po-blue);
+  white-space: nowrap;
+}
 .po-work-slip__review > span { font-size: 14px; font-weight: 650; }
-.po-work-slip__review svg { width: 17px; }
-.po-work-slip__review small { color: var(--po-muted); font-size: 10px; text-align: right; }
+.po-work-slip__review svg { width: 18px; flex: 0 0 auto; }
+
+@media (min-width: 1241px) {
+  .po-topbar__date {
+    align-items: center;
+    flex-direction: row;
+    gap: 24px;
+  }
+  .po-close-board { border-top: 0; }
+  .po-date-switcher { min-width: 250px; }
+  .po-close-board__legend,
+  .po-close-rail { grid-template-columns: 26% 12.4% 13.7% 13.9% 15.7% 18.3%; }
+  .po-close-board__legend { min-height: 70px; }
+  .po-close-rail { min-height: 130px; }
+  .po-close-rail:last-child { border-bottom: 0; }
+  .po-close-rail::after {
+    top: 49px;
+    right: calc(18.3% - 28.5px);
+    left: calc(26% + 30px);
+  }
+  .po-close-rail > header.po-close-location {
+    grid-template-columns: 58px 1fr;
+    align-content: start;
+    align-items: center;
+    gap: 20px;
+    min-height: 0;
+    padding: 30px 18px 0 0;
+  }
+  .po-location-avatar { width: 58px; height: 58px; }
+  .po-close-step {
+    align-items: flex-start;
+    padding: 36px 9px 12px 18px;
+    text-align: left;
+  }
+  .po-step-icon { width: 24px; height: 24px; flex-basis: 24px; }
+  .po-step-icon svg { width: 12px; }
+  .po-close-step > div { align-items: flex-start; }
+  .po-close-action {
+    align-items: flex-start;
+    padding: 35px 8px 0 16px;
+  }
+  .po-close-action--closed {
+    align-items: center;
+    padding-top: 0;
+  }
+  .po-close-endpoint {
+    grid-template-columns: 15px 1fr 13px;
+    align-items: start;
+    gap: 22px;
+  }
+  .po-close-endpoint > i { width: 15px; height: 15px; }
+  .po-close-endpoint strong { font-size: 16px; }
+  .po-prior-settlements { margin-top: 16px; }
+  .po-exceptions-page { padding-top: 12px; }
+  .po-exceptions-page .po-back-link { margin-bottom: 9px; }
+  .po-exceptions-heading .po-filter-menu {
+    align-self: flex-start;
+    margin-top: 24px;
+  }
+  .po-work-slip > div { padding: 28px 32px; }
+  .po-work-slip__amount { padding-right: 24px !important; padding-left: 44px !important; }
+  .po-work-slip__body { padding-right: 24px !important; padding-left: 36px !important; }
+  .po-work-slip__age { padding-right: 8px !important; padding-left: 8px !important; }
+  .po-work-slip__review { padding-right: 20px !important; padding-left: 16px !important; }
+  .po-work-slip + .po-work-slip {
+    margin-top: 24px;
+    border-top: 1px solid var(--po-line);
+  }
+}
 
 /* 03 — EX-104 decision bench */
 .po-decision-page { padding-top: 28px; }
@@ -1146,7 +1222,13 @@
   .po-close-rail > header.po-close-location { grid-column: 1 / -1; min-height: 96px; border-bottom: 1px solid var(--po-line); }
   .po-close-step { min-height: 112px; padding-top: 32px; border-right: 0; }
   .po-close-action { grid-column: 1 / -1; min-height: 64px; border-top: 1px solid var(--po-line); }
-  .po-close-endpoint { max-width: 240px; }
+  .po-close-endpoint {
+    grid-template-columns: 12px max-content 13px;
+    justify-content: center;
+    gap: 14px;
+    max-width: 240px;
+  }
+  .po-close-endpoint > i { width: 12px; height: 12px; }
   .po-prior-settlements__legend { display: none; }
   .po-prior-settlement-row { grid-template-columns: 80px 1fr auto; }
   .po-prior-settlement-row > span:nth-of-type(1),
