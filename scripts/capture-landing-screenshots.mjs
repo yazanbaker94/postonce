@@ -73,14 +73,15 @@ try {
     .home-brand__crop img { width: 180px !important; }
     .home-nav { gap: 28px !important; font-size: 12px !important; }
     .home-button--nav { min-height: 44px !important; }
-    .home-hero { min-height: 550px !important; grid-template-columns: .4fr .6fr !important; }
-    .home-hero__copy { padding: 48px 0 42px 64px !important; }
+    .home-hero { display: grid !important; height: 550px !important; min-height: 550px !important; grid-template-columns: .4fr .6fr !important; }
+    .home-hero__copy { position: relative !important; inset: auto !important; width: auto !important; padding: 48px 0 42px 64px !important; }
     .home-hero h1 { font-size: 58px !important; }
     .home-hero__lede { max-width: 440px !important; margin-top: 20px !important; font-size: 14px !important; line-height: 1.45 !important; }
     .home-actions { margin-top: 22px !important; }
     .home-button { min-height: 42px !important; }
     .home-hero__note { display: none !important; }
-    .home-hero__art img { top: -17% !important; right: -12% !important; width: 850px !important; }
+    .home-hero__art { position: relative !important; inset: auto !important; width: auto !important; height: auto !important; }
+    .home-hero__art img { top: -17% !important; right: -12% !important; left: auto !important; width: 850px !important; }
   ` });
   await page.screenshot({ path: ogPreview });
 

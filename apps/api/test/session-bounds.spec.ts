@@ -39,6 +39,20 @@ describe("Public demo resource bounds", () => {
     expect(await repository.get(third.session.id)).not.toBeNull();
   });
 
+  it("treats an expired memory session as absent on reads and mutations", async () => {
+    const repository = new MemoryDemoRepository(10, 1);
+    const expired = createSeedState(randomUUID(), new Date(Date.now() - 61_000));
+    await repository.create(expired);
+
+    let mutationRan = false;
+    expect(await repository.get(expired.session.id)).toBeNull();
+    expect(await repository.mutate(expired.session.id, () => {
+      mutationRan = true;
+      return { value: true, changed: true };
+    })).toBeNull();
+    expect(mutationRan).toBe(false);
+  });
+
   it("rate-limits mutation and reset traffic per isolated session", async () => {
     const repository = new MemoryDemoRepository();
     const config = new ConfigService({

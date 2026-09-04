@@ -6,14 +6,14 @@ const operationalStates = [
   { label: 'Lost response', state: 'Recovered', tone: 'amber', glyph: 'triangle' },
   { label: 'Ambiguous allocation', state: 'Escalated', tone: 'coral', glyph: 'square' },
   { label: 'Bank deposit', state: 'Reconciled', tone: 'green', glyph: 'ring' },
-  { label: 'Evidence', state: 'Attached', tone: 'blue', glyph: 'check' },
+  { label: 'Evidence attached to', state: 'Every decision', tone: 'blue', glyph: 'check' },
 ] as const;
 
 const evidenceStages = [
   { step: '01', label: 'Intake', time: '10:21:11', title: 'Payment received', detail: 'Provider · evt_ns_1001' },
   { step: '02', label: 'Decide', time: '10:21:12', title: 'Exact reference', detail: 'Rule · AR Allocation v4' },
   { step: '03', label: 'Post', time: '10:21:12', title: 'Ledger mutation', detail: 'Entry · SL-8871' },
-  { step: '04', label: 'Evidence', time: '10:21:13', title: 'Record sealed', detail: 'Hash · 6B7E…C01A' },
+  { step: '04', label: 'Evidence', time: '10:21:13', title: 'Audit appended', detail: 'Actor · correlation · result' },
   { step: '05', label: 'Done', time: '10:21:13', title: 'Effect committed', detail: 'Result · Posted once' },
 ] as const;
 
@@ -32,10 +32,12 @@ function MarketingHeader() {
     <header className="home-header">
       <Link to="/" className="home-header__brand" aria-label="PostOnce home"><BrandLogo /></Link>
       <nav className="home-nav" aria-label="Primary navigation">
+        <a href="#how-it-works">Platform</a>
         <a href="#how-it-works">How it works</a>
         <a href="#evidence">Evidence</a>
         <Link to="/architecture">Architecture</Link>
-        <Link to="/demo" className="home-button home-button--primary home-button--nav">Run the close <span aria-hidden="true">→</span></Link>
+        <a href="https://github.com/yazanbaker94/postonce" target="_blank" rel="noreferrer">Source ↗</a>
+        <Link to="/app/close" className="home-button home-button--primary home-button--nav">Run the close <span aria-hidden="true">→</span></Link>
       </nav>
     </header>
   );
@@ -48,14 +50,30 @@ function MarketingFooter() {
         <BrandLogo inverse />
         <p>Failure-safe payment posting and reconciliation for teams that close the books.</p>
       </div>
-      <nav aria-label="Footer navigation">
-        <Link to="/demo">Control room</Link>
-        <Link to="/architecture">Architecture</Link>
-        <a href="https://github.com/yazanbaker94/postonce" target="_blank" rel="noreferrer">Source ↗</a>
+      <nav className="home-footer__links" aria-label="Platform links">
+        <strong>Platform</strong>
+        <a href="#how-it-works">How it works</a>
+        <Link to="/app/close">Daily close</Link>
+        <a href="#evidence">Evidence</a>
       </nav>
+      <nav className="home-footer__links" aria-label="Project links">
+        <strong>Project</strong>
+        <Link to="/architecture">Architecture</Link>
+        <a href="https://github.com/yazanbaker94/postonce" target="_blank" rel="noreferrer">Source code ↗</a>
+      </nav>
+      <div className="home-footer__facts">
+        <strong>Scope</strong>
+        <span>Engineering case study</span>
+        <span>Synthetic data</span>
+        <span>No payment data</span>
+      </div>
       <div className="home-footer__disclaimer">
         <strong>Independent engineering case study</strong>
         <p>All organizations, transactions, endpoints, and identities are fictional. No real payment data.</p>
+      </div>
+      <div className="home-footer__base">
+        <span>© 2026 PostOnce · Synthetic product environment.</span>
+        <span>Synthetic data only</span>
       </div>
     </footer>
   );
@@ -68,14 +86,12 @@ export function Landing() {
       <main>
         <section className="home-hero" aria-labelledby="home-hero-title">
           <div className="home-hero__copy">
-            <p className="home-kicker">Failure-safe financial operations</p>
             <h1 id="home-hero-title"><span>Every payment</span><br /><span>posts once.</span><br /><em>Every exception</em><br /><em>stays explainable.</em></h1>
-            <p className="home-hero__lede">PostOnce proves what happens between payment approval and books reconciled—including duplicates, retries, ambiguous allocations, and lost responses.</p>
+            <p className="home-hero__lede">PostOnce makes each financial effect idempotent across unreliable systems so your close finishes clean and your audit never starts from scratch.</p>
             <div className="home-actions">
-              <Link to="/demo" className="home-button home-button--primary">Run the close <span aria-hidden="true">→</span></Link>
-              <Link to="/demo" className="home-button home-button--text">Explore the control room <span aria-hidden="true">→</span></Link>
+              <Link to="/app/close" className="home-button home-button--primary">Run the close <span aria-hidden="true">→</span></Link>
+              <Link to="/app/close" className="home-button home-button--text">Explore the workspace <span aria-hidden="true">→</span></Link>
             </div>
-            <p className="home-hero__note"><span aria-hidden="true">●</span> Interactive close · synthetic data only</p>
           </div>
 
           <div className="home-hero__art" aria-label="PostOnce routing payments through evidence and exception paths">
@@ -105,8 +121,8 @@ export function Landing() {
           <div className="home-flow__inner">
             <div className="home-flow__copy">
               <p className="home-kicker home-kicker--dark">How one payment moves</p>
-              <h2 id="home-flow-title">From uncertainty<br />to exact-once.</h2>
-              <p>PostOnce routes each payment through a failure-safe path. Signals may fail, but the financial effect stays controlled, recorded, and provable.</p>
+              <h2 id="home-flow-title">From uncertainty<br />to verified.</h2>
+              <p>PostOnce routes each payment through a failure-safe path. Signals may fail, but the financial effect is controlled, recorded, and provable.</p>
               <Link to="/architecture" className="home-inline-link home-inline-link--dark">See the full flow <span aria-hidden="true">→</span></Link>
             </div>
             <div className="home-flow__art">
@@ -129,7 +145,7 @@ export function Landing() {
           <div className="home-control-plane__copy">
             <p className="home-kicker">Failures are first-class</p>
             <h2 id="home-control-plane-title">Built for the<br />real world.</h2>
-            <p>Networks drop. Responses disappear. Events repeat. Systems disagree. PostOnce keeps the financial effect controlled and explainable.</p>
+            <p>Networks drop. Systems time out. Files arrive twice. We expect it—so your books don’t suffer for it.</p>
             <Link to="/architecture" className="home-inline-link">See how failures are handled <span aria-hidden="true">→</span></Link>
           </div>
           <div className="home-control-plane__art">
@@ -150,8 +166,8 @@ export function Landing() {
           <div className="home-evidence__intro">
             <p className="home-kicker">Proof, not promises</p>
             <h2 id="home-evidence-title">Every decision<br />leaves a trail.</h2>
-            <p>Every mutation, retry, lookup, and human decision is evidence-linked and reconstructable—without turning uncertainty into a silent guess.</p>
-            <Link to="/demo" className="home-inline-link">Inspect the evidence <span aria-hidden="true">→</span></Link>
+            <p>Every post, route, retry, and rule is captured as immutable evidence—ready for audit, reconciliation, and you.</p>
+            <Link to="/app/payments/PAY-1017" className="home-inline-link">Inspect the evidence <span aria-hidden="true">→</span></Link>
           </div>
           <div className="home-proof-rail" aria-label="Example payment evidence sequence">
             <div className="home-proof-rail__heading"><strong>Proof rail</strong><span>corr_close_7a4</span></div>
@@ -165,7 +181,7 @@ export function Landing() {
                 </li>
               ))}
             </ol>
-            <Link to="/demo" className="home-proof-rail__action">View full evidence bundle <span aria-hidden="true">→</span></Link>
+            <Link to="/app/payments/PAY-1017" className="home-proof-rail__action">View full evidence bundle <span aria-hidden="true">→</span></Link>
           </div>
         </section>
 
@@ -174,7 +190,7 @@ export function Landing() {
             <p className="home-kicker">Close with confidence</p>
             <h2 id="home-control-room-title">Watch the close<br />prove itself.</h2>
             <p>Follow the Friday close from payment arrival through failure, recovery, evidence, and settlement.</p>
-            <Link to="/demo" className="home-inline-link">Explore the control room <span aria-hidden="true">→</span></Link>
+            <Link to="/app/close" className="home-inline-link">Explore the workspace <span aria-hidden="true">→</span></Link>
           </div>
           <div className="home-control-room__placeholder" aria-hidden="true">
             <span className="home-control-room__placeholder-mark" />
@@ -184,8 +200,8 @@ export function Landing() {
         <section className="home-final-cta" aria-labelledby="home-final-title">
           <h2 id="home-final-title">Payments will fail.<br />Your close doesn't have to.</h2>
           <div>
-            <Link to="/demo" className="home-button home-button--light">Run the close <span aria-hidden="true">→</span></Link>
-            <Link to="/demo" className="home-inline-link home-inline-link--dark">Inspect the evidence <span aria-hidden="true">→</span></Link>
+            <Link to="/app/close" className="home-button home-button--light">Run the close <span aria-hidden="true">→</span></Link>
+            <Link to="/app/payments/PAY-1017" className="home-inline-link home-inline-link--dark">Inspect the evidence <span aria-hidden="true">→</span></Link>
           </div>
         </section>
       </main>

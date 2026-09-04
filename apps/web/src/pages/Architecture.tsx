@@ -6,7 +6,7 @@ const invariants = [
   ['INV-02', 'Allocation ceiling', 'allocated ≤ payment ∧ invoice', 'A payment cannot overrun either remaining balance.'],
   ['INV-03', 'Stable destination key', 'retry.key = original.key', 'A lost response triggers lookup, not another posting.'],
   ['INV-04', 'Versioned resolution', 'expected_version = current_version', 'The stale controller sees the winner instead of overwriting.'],
-  ['INV-05', 'Close gate', 'variance = 0 ∧ blockers = 0', 'Books become ready only when evidence supports the state.'],
+  ['INV-05', 'Operational close gate', 'verified = payments ∧ blockers = 0', 'A location can close while its payout is still pending.'],
 ];
 
 export function Architecture() {
@@ -21,7 +21,7 @@ export function Architecture() {
           </div>
           <div className="architecture-hero__aside">
             <p>PostOnce does not claim a network guarantee it cannot provide. It composes database constraints, operation identity, append-only evidence, and human-visible uncertainty.</p>
-            <Link to="/demo" className="button button--primary">Exercise the failures <Arrow /></Link>
+            <Link to="/app/close" className="button button--primary">Open the workspace <Arrow /></Link>
           </div>
         </section>
 
@@ -67,17 +67,17 @@ export function Architecture() {
         <section className="race-section">
           <div className="section-index">04 / CONCURRENCY</div>
           <div className="race-section__visual">
-            <div className="race-request race-request--maya"><span>MAYA / VERSION 1</span><strong>Resolve → RO-8031</strong><i /></div>
-            <div className="race-lock"><span>EX-0184</span><strong>V1 → V2</strong><small>COMPARE + SWAP</small></div>
-            <div className="race-request race-request--jon"><span>JON / VERSION 1</span><strong>Resolve → RO-8037</strong><i /></div>
+            <div className="race-request race-request--maya"><span>MAYA / VERSION 1</span><strong>Resolve EX-104 → RO-8004</strong><i /></div>
+            <div className="race-lock"><span>EX-104</span><strong>V1 → V2</strong><small>COMPARE + SWAP</small></div>
+            <div className="race-request race-request--jon"><span>STALE CLIENT / VERSION 1</span><strong>Resolve EX-104 → RO-8031</strong><i /></div>
             <div className="race-result race-result--accepted"><Status tone="good">HTTP 200</Status><strong>Maya’s decision appended</strong></div>
-            <div className="race-result race-result--rejected"><Status tone="bad">HTTP 409</Status><strong>Jon receives the winner</strong></div>
+            <div className="race-result race-result--rejected"><Status tone="bad">HTTP 409</Status><strong>Stale client receives the winner</strong></div>
           </div>
           <div className="race-section__copy">
             <p className="eyebrow">NO LAST-WRITE-WINS</p>
             <h2>A stale decision becomes evidence.</h2>
-            <p>The public walkthrough injects this winner-and-stale-writer outcome deterministically, so every reviewer can inspect the same case. It does not pretend the button itself launches two simultaneous requests.</p>
-            <p className="race-disclosure"><span>REAL CONCURRENCY PROOF</span>The same version guard is covered by an integration test that sends two concurrent HTTP commands against PostgreSQL and asserts one 200 winner and one structured 409 conflict.</p>
+            <p>If two clients submit version 1, the first verified decision wins. A stale browser reloads that winning record instead of overwriting it.</p>
+            <p className="race-disclosure"><span>CONCURRENCY PROOF</span>An integration test sends two concurrent HTTP commands against PostgreSQL and asserts one 200 winner and one structured 409 conflict.</p>
           </div>
         </section>
 
@@ -88,7 +88,7 @@ export function Architecture() {
             <article><span>UNIT</span><strong>Domain invariants</strong><p>Money bounds, rule confidence, operation identity, close gating.</p><Status tone="good">AUTOMATED</Status></article>
             <article><span>INTEGRATION</span><strong>Database boundaries</strong><p>Unique claims, transaction rollback, inbox and outbox state.</p><Status tone="good">AUTOMATED</Status></article>
             <article><span>RACE</span><strong>Concurrent resolution</strong><p>Two version-1 commands; one accepted, one structured 409.</p><Status tone="good">DETERMINISTIC</Status></article>
-            <article><span>BROWSER</span><strong>Reviewer journey</strong><p>Isolated session, all six actions, refresh, reset, and evidence.</p><Status tone="good">PLAYWRIGHT</Status></article>
+            <article><span>BROWSER</span><strong>Controller journey</strong><p>Three exception decisions, verified posting, operational close, payout adjustment, refresh, and reset.</p><Status tone="good">PLAYWRIGHT</Status></article>
             <article className="verification-grid__benchmark"><span>BENCHMARK / 50,000 RECORDS</span><strong>Indexed reference lookup</strong><div><b>O(1) expected</b><i /><small>vs O(n) sequential scan</small></div><p>Synthetic deterministic fixture. Reported as engineering evidence—not a production performance claim.</p></article>
           </div>
         </section>
@@ -105,7 +105,7 @@ export function Architecture() {
 
         <section className="architecture-cta">
           <div><span className="record-id">NEXT / BREAK IT SAFELY</span><h2>See each decision under pressure.</h2></div>
-          <Link to="/demo" className="button button--primary">Open the control room <Arrow /></Link>
+          <Link to="/app/close" className="button button--primary">Open daily close <Arrow /></Link>
         </section>
       </main>
       <SiteFooter />

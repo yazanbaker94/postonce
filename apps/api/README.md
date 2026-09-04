@@ -1,6 +1,6 @@
 # PostOnce API
 
-The API is a NestJS/TypeScript implementation of a deliberately small payment-posting reliability problem. It uses fictional adapters and synthetic data only.
+The API is the NestJS/TypeScript backend for PostOnce's dealership payment workspace. It serves the operational close, exception-resolution, payment-evidence, deposit-reconciliation, activity, and integration projections used by the product UI. The public environment uses fictional adapters and synthetic data only.
 
 ## What is real
 
@@ -12,7 +12,7 @@ The API is a NestJS/TypeScript implementation of a deliberately small payment-po
 - integration attempts and audit events are append-only;
 - the HTTP race test sends two resolution commands at version 1 and observes one `200` and one `409`;
 - the same destination key recovers a commit whose response was lost;
-- close remains blocked until the exception resolves and the settlement equation reaches zero variance.
+- operational close becomes available when the posting exception is resolved; payout settlement is tracked independently and can be reconciled later with signed adjustments and evidence.
 
 ## What is simulated
 
@@ -44,4 +44,4 @@ Set `POSTONCE_TEST_DATABASE_URL` to a migrated disposable database to enable the
 
 ## Public-demo bounds
 
-Session creation is rate-limited by a hashed, validated ingress-peer address supplied by the private proxy boundary. Public forwarding headers are ignored. Sessions beyond the configured inactivity horizon are pruned during admission, and the stored-session count is capped. PostgreSQL cleanup and admission use an advisory transaction lock so concurrent creation cannot race past the cap. See `.env.example` for controls.
+Session creation is rate-limited by a hashed, validated ingress-peer address supplied by the private proxy boundary. Public forwarding headers are ignored. Expired sessions are rejected on reads and mutations, are opportunistically pruned during admission, and the stored-session count is capped. PostgreSQL cleanup and admission use an advisory transaction lock so concurrent creation cannot race past the cap. See `.env.example` for controls.

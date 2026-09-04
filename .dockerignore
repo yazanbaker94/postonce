@@ -5,6 +5,7 @@ node_modules
 coverage
 test-results
 playwright-report
-.env
-infra/.env
+**/.env
+**/.env.*
+!**/.env.example
 backups

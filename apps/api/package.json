@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "NestJS API for the PostOnce failure-safe payment posting demo.",
+  "description": "NestJS API for PostOnce payment posting, operational close, and payout reconciliation.",
   "scripts": {
     "prebuild": "npm run build --workspace @postonce/contracts",
     "build": "tsc -p tsconfig.build.json",

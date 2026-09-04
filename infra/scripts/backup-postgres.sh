@@ -39,4 +39,32 @@ case "$retention_days" in
 esac
 
 find "$BACKUP_ROOT" -type f -name 'postonce-*.dump' -mtime "+$retention_days" -delete
+
+max_count=${BACKUP_MAX_COUNT:-$(read_env_value BACKUP_MAX_COUNT)}
+max_count=${max_count:-7}
+case "$max_count" in
+  ''|*[!0-9]*)
+    printf '%s\n' "BACKUP_MAX_COUNT must be a positive integer." >&2
+    exit 1
+    ;;
+esac
+if [ "$max_count" -lt 1 ]; then
+  printf '%s\n' "BACKUP_MAX_COUNT must be at least 1." >&2
+  exit 1
+fi
+
+# Cap rapid-release growth as well as age. Generated backup names contain no
+# whitespace; validate the resolved prefix again before deleting any old dump.
+find "$BACKUP_ROOT" -maxdepth 1 -type f -name 'postonce-*.dump' -printf '%T@ %p\n' | \
+  sort -rn | awk -v keep="$max_count" 'NR > keep { sub(/^[^ ]+ /, ""); print }' | \
+  while IFS= read -r old_backup; do
+    [ -n "$old_backup" ] || continue
+    case "$old_backup" in
+      "$BACKUP_ROOT"/postonce-*.dump) rm -f -- "$old_backup" ;;
+      *)
+        printf '%s\n' "Refusing to prune a backup outside the PostOnce backup root." >&2
+        exit 1
+        ;;
+    esac
+  done
 printf '%s\n' "$backup_path"

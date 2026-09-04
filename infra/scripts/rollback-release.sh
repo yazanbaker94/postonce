@@ -20,7 +20,7 @@ if [ "$deploy_root" != /opt/postonce ] || [ "$origin_port" != 18044 ] || [ "$(id
   printf '%s\n' "Rollback requires the reviewed PostOnce VPS boundary and privileged operator." >&2
   exit 1
 fi
-for command_name in awk cat chmod cp dirname docker flock grep id ln mktemp mv readlink realpath rm sed stat tail tr; do
+for command_name in awk cat chmod cp dirname docker flock grep id ln mktemp mv readlink realpath rm sed stat systemctl tail tr; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf '%s\n' "Missing required command: $command_name" >&2
     exit 1
@@ -32,6 +32,13 @@ if ! flock -w 120 9; then
   printf '%s\n' "Another PostOnce release operation is active." >&2
   exit 1
 fi
+
+for protected_service in ytmp3-api@8080.service ytmp3-api@8081.service ytmp3-pot.service caddy.service docker.service; do
+  if ! systemctl is-active --quiet "$protected_service"; then
+    printf '%s\n' "Protected shared-host service is not active: $protected_service" >&2
+    exit 1
+  fi
+done
 
 releases_root="$deploy_root/releases"
 current_link="$deploy_root/current"
@@ -130,7 +137,7 @@ cleanup() {
     cp "$env_snapshot" "$env_file"
     chmod 0600 "$env_file"
     docker compose -p postonce --env-file "$env_file" -f "$current_release/infra/compose.yaml" \
-      up -d --no-build --wait --wait-timeout 180 >/dev/null 2>&1 || true
+      up -d --no-build --remove-orphans --wait --wait-timeout 180 >/dev/null 2>&1 || true
     printf '%s\n' "Rollback failed; the previous application release was requested again." >&2
   fi
   rm -f -- "$env_snapshot" "$next_link"
@@ -159,12 +166,23 @@ set_env_value POSTONCE_API_IMAGE "$api_image"
 set_env_value POSTONCE_GATEWAY_IMAGE "$gateway_image"
 
 docker compose -p postonce --env-file "$env_file" -f "$target_release/infra/compose.yaml" config --quiet
-docker compose -p postonce --env-file "$env_file" -f "$target_release/infra/compose.yaml" pull api gateway
+for rollback_image in "$api_image" "$gateway_image"; do
+  if ! docker image inspect "$rollback_image" >/dev/null 2>&1; then
+    docker pull "$rollback_image"
+  fi
+done
 docker compose -p postonce --env-file "$env_file" -f "$target_release/infra/compose.yaml" \
-  up -d --no-build --wait --wait-timeout 180
+  up -d --no-build --remove-orphans --wait --wait-timeout 180
 POSTONCE_ENV_FILE="$env_file" POSTONCE_DEPLOY_ROOT="$deploy_root" \
 POSTONCE_BACKUP_DIR="$deploy_root/shared/backups" \
   sh "$target_release/infra/scripts/healthcheck.sh"
+
+for protected_service in ytmp3-api@8080.service ytmp3-api@8081.service ytmp3-pot.service caddy.service docker.service; do
+  if ! systemctl is-active --quiet "$protected_service"; then
+    printf '%s\n' "Protected shared-host service changed state during rollback: $protected_service" >&2
+    exit 1
+  fi
+done
 
 ln -s "$target_release" "$next_link"
 mv -Tf "$next_link" "$current_link"

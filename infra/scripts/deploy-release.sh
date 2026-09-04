@@ -79,6 +79,9 @@ next_link="$deploy_root/.current-$release_id.next"
 ownership_marker="$deploy_root/.postonce-deployment"
 site_file=/etc/caddy/sites/postonce.caddy
 previous_release=
+fresh_install=false
+api_image=
+gateway_image=
 
 if [ -e "$deploy_root" ]; then
   if [ -L "$deploy_root" ] || [ ! -d "$deploy_root" ] || \
@@ -100,6 +103,7 @@ if [ -e "$deploy_root" ]; then
     exit 1
   fi
 else
+  fresh_install=true
   if [ -n "$(docker ps -a --filter label=com.docker.compose.project=postonce --format '{{.Names}}')" ]; then
     printf '%s\n' "Unowned PostOnce Docker resources already exist." >&2
     exit 1
@@ -152,9 +156,15 @@ cleanup() {
       cp "$env_snapshot" "$env_file"
       chmod 0600 "$env_file"
     fi
-    if [ "$release_started" = true ] && [ -n "$previous_release" ] && [ -f "$env_file" ]; then
+    if [ "$release_started" = true ] && [ "$fresh_install" = true ] && \
+       [ -f "$env_file" ] && [ -f "$release_dir/infra/compose.yaml" ]; then
+      # A failed clean install must not leave a database, network, container,
+      # or environment behind for the next attempt to inherit.
+      docker compose -p postonce --env-file "$env_file" -f "$release_dir/infra/compose.yaml" \
+        down --volumes --remove-orphans >/dev/null 2>&1 || true
+    elif [ "$release_started" = true ] && [ -n "$previous_release" ] && [ -f "$env_file" ]; then
       docker compose -p postonce --env-file "$env_file" -f "$previous_release/infra/compose.yaml" \
-        up -d --no-build --wait --wait-timeout 180 >/dev/null 2>&1 || true
+        up -d --no-build --remove-orphans --wait --wait-timeout 180 >/dev/null 2>&1 || true
     elif [ "$release_started" = true ] && [ -f "$env_file" ] && [ -f "$release_dir/infra/compose.yaml" ]; then
       # A failed first install may have created only PostOnce containers. Stop
       # that exact Compose project, but preserve its database volume and env.
@@ -175,6 +185,33 @@ cleanup() {
         "$releases_root"/*) if [ "$active" != "$release_dir" ]; then rm -rf -- "$release_dir"; fi ;;
       esac
     fi
+    if [ "$fresh_install" = true ]; then
+      remaining_resources=$(
+        docker ps -a --filter label=com.docker.compose.project=postonce --format 'container {{.Names}}'
+        docker network ls --filter label=com.docker.compose.project=postonce --format 'network {{.Name}}'
+        docker volume ls --filter label=com.docker.compose.project=postonce --format 'volume {{.Name}}'
+      )
+      if [ -z "$remaining_resources" ] && [ ! -e "$current_link" ] && [ ! -L "$current_link" ] && \
+         [ -d "$deploy_root" ] && [ ! -L "$deploy_root" ] && \
+         [ -f "$ownership_marker" ] && [ ! -L "$ownership_marker" ] && \
+         [ "$(cat -- "$ownership_marker")" = POSTONCE_DEPLOYMENT_V1 ]; then
+        rm -rf -- "$deploy_root"
+        for failed_image in "$api_image" "$gateway_image"; do
+          [ -n "$failed_image" ] || continue
+          docker image rm "$failed_image" >/dev/null 2>&1 || true
+        done
+      else
+        printf '%s\n' "Failed clean install retained recovery state because owned resources remain." >&2
+      fi
+    else
+      # A failed update can leave newly pulled immutable references even after
+      # the prior containers are healthy again. Remove only those two candidate
+      # references; Docker will refuse either one if a running release uses it.
+      for failed_image in "$api_image" "$gateway_image"; do
+        [ -n "$failed_image" ] || continue
+        docker image rm "$failed_image" >/dev/null 2>&1 || true
+      done
+    fi
     printf '%s\n' "PostOnce deployment stopped; unrelated services were not modified." >&2
   fi
 
@@ -192,6 +229,8 @@ for required in \
   infra/caddy/host-site.caddy \
   infra/scripts/preflight-vps.sh \
   infra/scripts/healthcheck.sh \
+  infra/scripts/destroy-failed-postonce.sh \
+  infra/scripts/prune-postonce-releases.sh \
   release-manifest.env
 do
   if [ ! -f "$stage_dir/$required" ] || [ -L "$stage_dir/$required" ]; then
@@ -284,6 +323,7 @@ else
     printf '%s\n' 'DEMO_SESSION_MUTATION_WINDOW_SECONDS=600'
     printf '%s\n' 'DEMO_RATE_LIMIT_TRACKED_KEYS=4096'
     printf '%s\n' 'BACKUP_RETENTION_DAYS=14'
+    printf '%s\n' 'BACKUP_MAX_COUNT=7'
   } > "$env_file"
   unset postgres_password
   chmod 0600 "$env_file"
@@ -326,7 +366,7 @@ docker compose -p postonce --env-file "$env_file" -f "$release_dir/infra/compose
 docker compose -p postonce --env-file "$env_file" -f "$release_dir/infra/compose.yaml" pull db api gateway
 release_started=true
 docker compose -p postonce --env-file "$env_file" -f "$release_dir/infra/compose.yaml" \
-  up -d --no-build --wait --wait-timeout 180
+  up -d --no-build --remove-orphans --wait --wait-timeout 180
 
 POSTONCE_ENV_FILE="$env_file" POSTONCE_DEPLOY_ROOT="$deploy_root" POSTONCE_BACKUP_DIR="$backup_root" \
   sh "$release_dir/infra/scripts/healthcheck.sh"
@@ -342,10 +382,20 @@ install -o root -g root -m 0644 "$release_dir/infra/caddy/host-site.caddy" "$sit
 site_changed=true
 caddy validate --config /etc/caddy/Caddyfile >/dev/null
 systemctl reload caddy
+for protected_service in ytmp3-api@8080.service ytmp3-api@8081.service ytmp3-pot.service caddy.service docker.service; do
+  if ! systemctl is-active --quiet "$protected_service"; then
+    printf '%s\n' "Protected shared-host service changed state during deployment: $protected_service" >&2
+    exit 1
+  fi
+done
 
 ln -s "$release_dir" "$next_link"
 mv -Tf "$next_link" "$current_link"
 
 completed=true
+if ! POSTONCE_DEPLOY_ROOT="$deploy_root" \
+  sh "$release_dir/infra/scripts/prune-postonce-releases.sh" "$previous_release"; then
+  printf '%s\n' "Warning: release activated, but bounded PostOnce retention needs operator review." >&2
+fi
 printf '%s\n' "PostOnce origin release is healthy and active."
 printf '%s\n' "Public Cloudflare DNS and TLS verification remain a separate operator step."

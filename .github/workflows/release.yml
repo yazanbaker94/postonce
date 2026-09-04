@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17.11-alpine
+        image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_USER: postonce
           POSTGRES_PASSWORD: postonce_release_ci
@@ -68,12 +68,26 @@ jobs:
             sh -n "$script"
           done
           docker compose -f infra/compose.yaml config --quiet
-          docker run --rm -i caddy:2.11.4-alpine \
+          docker run --rm -i caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 \
             caddy adapt --config /dev/stdin --adapter caddyfile --validate \
             < infra/caddy/Caddyfile > /dev/null
-          docker run --rm -i caddy:2.11.4-alpine \
+          docker run --rm -i caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 \
             caddy adapt --config /dev/stdin --adapter caddyfile --validate \
             < infra/caddy/host-site.caddy > /dev/null
+      - name: Parse the Windows operator script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'infra/scripts/deploy-from-operator.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
 
   images:
     name: Publish ${{ matrix.component }} image

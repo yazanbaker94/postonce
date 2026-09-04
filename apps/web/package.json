@@ -12,12 +12,14 @@
     "test:watch": "vitest",
     "pretest:e2e": "npm run build",
     "test:e2e": "playwright test",
+    "serve:api:e2e": "npm --prefix ../.. run build --workspace @postonce/api && npm --prefix ../.. run start --workspace @postonce/api",
     "prescreenshots": "npm run build",
     "serve:e2e": "vite preview --host 127.0.0.1 --port 4273",
     "screenshots": "playwright test --project=screenshots"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.2",
+    "@postonce/contracts": "*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3",

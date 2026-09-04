@@ -2,7 +2,7 @@
   "name": "postonce",
   "version": "0.1.0",
   "private": true,
-  "description": "Failure-safe payment posting and reconciliation engineering demo.",
+  "description": "Failure-safe dealership payment posting, operational close, and payout reconciliation.",
   "engines": {
     "node": ">=22.13.0"
   },

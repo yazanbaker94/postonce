@@ -1,1145 +1,1210 @@
+import { createHash } from "node:crypto";
 import {
-  type ActionRequest,
+  WORKSPACE_BUSINESS_DATE,
   type Allocation,
   type AuditEvent,
-  type DemoAction,
+  type CloseLocationRequest,
+  type CommandReceipt,
   type DemoException,
-  type DemoState,
+  type DmsRecord,
   type IntegrationAttempt,
   type OutboxItem,
+  type Payment,
+  type ProcessorPayout,
+  type ResolveExceptionRequest,
+  type SettlementAdjustmentRequest,
+  type WorkspaceState,
 } from "@postonce/contracts";
-import { DomainError, VersionConflictError } from "../../common/domain-error.js";
+import { DomainError } from "../../common/domain-error.js";
+
+export type EngineRejection = {
+  code: "VERSION_CONFLICT";
+  message: string;
+  status: 409;
+  correlationId: string;
+  details: Record<string, unknown>;
+};
 
 export type EngineOutcome = {
   changed: boolean;
   replayed: boolean;
-  chapter: number;
   result: Record<string, unknown>;
+  rejected?: EngineRejection;
 };
 
-type ResolutionCommand = {
-  operationKey: string;
-  expectedVersion: number;
-  candidateInvoiceId: string;
-  acceptedAmountCents: number;
-  reason: string;
-  actor: string;
+type CloseProof = {
+  paymentCount: number;
+  verifiedPostingCount: number;
+  blockingExceptionCount: number;
+  settlementStatus: WorkspaceState["operationalCloses"][number]["settlementStatus"];
+  status: "PROCESSING" | "BLOCKED" | "READY";
 };
 
-const ACTION_CHAPTER: Record<Exclude<DemoAction, "run-all" | "resolve-exception">, number> = {
-  "process-routine": 1,
-  "deliver-duplicate": 2,
-  "simulate-lost-response": 3,
-  "open-ambiguous-exception": 4,
-  "simulate-resolution-race": 5,
-  "reconcile-settlement": 6,
+type ResolutionAction = "APPLY_TO_RECORD" | "LINK_REFUND" | "ATTACH_SPLIT";
+
+type ResolutionEffect = {
+  action: ResolutionAction;
+  targetId: string;
+  targetLabel: string;
+  amountCents: number;
+  verifiedAt: string;
 };
+
+const FIXTURE_TOTALS: Record<string, { count: number; signedTotalCents: number }> = {
+  roof_nlt: { count: 19, signedTotalCents: 1_384_217 },
+  roof_nlf: { count: 27, signedTotalCents: 2_160_480 },
+  roof_nls: { count: 16, signedTotalCents: 1_139_042 },
+};
+
+const FIXTURE_DEPARTMENTS: Record<string, Record<Payment["department"], number>> = {
+  roof_nlt: { SERVICE: 11, PARTS: 5, SALES: 3 },
+  roof_nlf: { SERVICE: 16, PARTS: 6, SALES: 5 },
+  roof_nls: { SERVICE: 9, PARTS: 4, SALES: 3 },
+};
+
+const COMMAND_TIMES = [
+  "2026-09-04T22:52:00.000Z",
+  "2026-09-04T22:55:00.000Z",
+  "2026-09-04T22:58:00.000Z",
+  "2026-09-04T23:02:00.000Z",
+  "2026-09-04T23:05:00.000Z",
+] as const;
 
 export class DemoEngine {
-  execute(state: DemoState, action: DemoAction, request: ActionRequest = {}): EngineOutcome {
-    if (action === "run-all") return this.runAll(state);
-    if (action === "resolve-exception") return this.resolveException(state, request);
-
-    if (state.completedActions.includes(action)) {
-      return {
-        changed: false,
-        replayed: true,
-        chapter: ACTION_CHAPTER[action],
-        result: this.replayResult(state, action),
-      };
-    }
-
-    this.assertPrerequisite(state, action);
-    let result: Record<string, unknown>;
-    switch (action) {
-      case "process-routine":
-        result = this.processRoutine(state);
-        break;
-      case "deliver-duplicate":
-        result = this.deliverDuplicate(state);
-        break;
-      case "simulate-lost-response":
-        result = this.simulateLostResponse(state);
-        break;
-      case "open-ambiguous-exception":
-        result = this.openAmbiguousException(state);
-        break;
-      case "simulate-resolution-race":
-        result = this.simulateResolutionRace(state);
-        break;
-      case "reconcile-settlement":
-        result = this.reconcileSettlement(state);
-        break;
-    }
-
-    this.completeAction(state, action, ACTION_CHAPTER[action]);
-    this.assertInvariants(state);
-    return { changed: true, replayed: false, chapter: ACTION_CHAPTER[action], result };
-  }
-
-  private runAll(state: DemoState): EngineOutcome {
-    if (state.completedActions.includes("run-all")) {
-      return {
-        changed: false,
-        replayed: true,
-        chapter: state.currentChapter,
-        result: this.replayResult(state, "run-all"),
-      };
-    }
-
-    const actions: Array<Exclude<DemoAction, "run-all" | "resolve-exception">> = [
-      "process-routine",
-      "deliver-duplicate",
-      "simulate-lost-response",
-      "open-ambiguous-exception",
-      "simulate-resolution-race",
-      "reconcile-settlement",
-    ];
-    const executed: string[] = [];
-    for (const action of actions) {
-      if (state.completedActions.includes(action)) continue;
-      if (
-        action === "simulate-resolution-race" &&
-        state.exceptions.some((item) => item.id === "exc_ambiguous_1009" && item.status === "RESOLVED")
-      ) {
-        const exception = state.exceptions.find((item) => item.id === "exc_ambiguous_1009")!;
-        state.completedActions.push(action);
-        this.setChapter(state, ACTION_CHAPTER[action]);
-        state.evidence.race = {
-          attempted: false,
-          winner: exception.resolution?.actor ?? null,
-          loser: null,
-          acceptedStatus: 200,
-          rejectedStatus: null,
-          winningVersion: exception.version,
-        };
-        this.updateCheck(state, "version_guard", "PASS", "Manual resolution already committed; race simulation skipped");
-        this.appendAudit(state, {
-          type: "RACE_SIMULATION_SKIPPED",
-          entityType: "exception",
-          entityId: exception.id,
-          actor: "guided-demo",
-          correlationId: this.correlation(state, "race_skipped"),
-          summary: "The exception was already resolved, so the synthetic race chapter did not submit another decision.",
-          details: { resolutionOperationKey: exception.resolution?.operationKey, resultingVersion: exception.version },
-        });
-        executed.push(`${action}:skipped-already-resolved`);
-        continue;
-      }
-      this.execute(state, action);
-      executed.push(action);
-    }
-    state.completedActions.push("run-all");
-    this.appendAudit(state, {
-      type: "GUIDED_RUN_COMPLETED",
-      entityType: "session",
-      entityId: state.session.id,
-      actor: "reviewer",
-      correlationId: this.correlation(state, "run_all"),
-      summary: "The entire failure-safe close was completed.",
-      details: { executed, closeStatus: state.close.status },
+  resolveException(
+    state: WorkspaceState,
+    exceptionId: string,
+    request: ResolveExceptionRequest,
+  ): EngineOutcome {
+    const scope = `exception:${exceptionId}:resolve`;
+    const fingerprint = this.fingerprint(scope, {
+      expectedVersion: request.expectedVersion,
+      targetId: request.targetId,
     });
-    this.assertInvariants(state);
-    return {
-      changed: true,
-      replayed: false,
-      chapter: 7,
-      result: {
-        executed,
-        closeStatus: state.close.status,
-        mutationProof: `${state.invariants.dmsAttempts} DMS attempts / ${state.invariants.dmsMutations} DMS mutations`,
-      },
-    };
-  }
+    const replay = this.replayCommand(state, request.idempotencyKey, scope, fingerprint);
+    if (replay) return replay;
 
-  private processRoutine(state: DemoState): Record<string, unknown> {
-    const correlationId = this.correlation(state, "routine");
-    const referenceIndex = new Map(state.invoices.map((invoice) => [invoice.repairOrderNumber, invoice]));
-    const routineIds = new Set(["pay_1001", "pay_1002", "pay_1003", "pay_1004", "pay_1005", "pay_1006", "pay_1007", "pay_1008", "pay_1011"]);
-    let matched = 0;
-    let posted = 0;
-
-    for (const payment of state.payments) {
-      if (!routineIds.has(payment.id)) continue;
-      this.acceptInboxDelivery(state, payment.externalEventId);
-      const invoice = payment.reference ? referenceIndex.get(payment.reference) : undefined;
-      if (!invoice) throw new Error(`Seed invariant failed: invoice missing for ${payment.id}`);
-      const operationKey = `op_${state.session.id.slice(0, 8)}_${payment.id}`;
-      this.allocate(state, payment.id, invoice.id, payment.amountCents, "EXACT_REFERENCE", operationKey);
-      this.createOutbox(state, payment.id, invoice.id, operationKey);
-      matched += 1;
-
-      // pay_1003 is intentionally left committed-to-local-ledger but pending at the boundary.
-      if (payment.id === "pay_1003") continue;
-      this.deliverOutboxNormally(state, operationKey, correlationId);
-      posted += 1;
-    }
-
-    const refund = this.requirePayment(state, "pay_1012");
-    this.acceptInboxDelivery(state, refund.externalEventId);
-    refund.status = "REFUNDED";
-
-    this.appendAudit(state, {
-      type: "ROUTINE_BATCH_PROCESSED",
-      entityType: "close",
-      entityId: "close_2026_08_30",
-      actor: "matcher",
-      correlationId,
-      summary: `${matched} exact-reference captures matched; ${posted} posted without review.`,
-      details: {
-        indexedLookup: "O(1) expected",
-        exactMatches: matched,
-        dmsPosted: posted,
-        pendingBoundaryTest: "pay_1003",
-        refundsRecorded: 1,
-      },
-    });
-
-    return {
-      exactMatches: matched,
-      postedWithoutReview: posted,
-      pendingOutbox: 1,
-      lookup: "indexed repair-order reference",
-      complexity: "O(1) expected per event",
-    };
-  }
-
-  private deliverDuplicate(state: DemoState): Record<string, unknown> {
-    const payment = this.requirePayment(state, "pay_1010");
-    const invoice = this.requireInvoice(state, "inv_8010");
-    const correlationId = this.correlation(state, "duplicate");
-    const operationKey = `inbox_northstar_${payment.externalEventId}`;
-
-    const firstAccepted = this.acceptInboxDelivery(state, payment.externalEventId);
-    this.integration(state, {
-      system: "NORTHSTAR_PROCESSOR",
-      direction: "INBOUND",
-      operation: "processor.payment.captured",
-      externalEventId: payment.externalEventId,
-      operationKey,
-      correlationId,
-      status: "ACCEPTED",
-      httpStatus: 202,
-      attempt: 1,
-      note: "The first delivery entered the durable inbox.",
-      sanitizedRequest: { eventId: payment.externalEventId, amountCents: payment.amountCents, currency: payment.currency },
-      sanitizedResponse: { accepted: true },
-    });
-
-    const destinationKey = `op_${state.session.id.slice(0, 8)}_${payment.id}`;
-    this.allocate(state, payment.id, invoice.id, payment.amountCents, "EXACT_REFERENCE", destinationKey);
-    this.createOutbox(state, payment.id, invoice.id, destinationKey);
-    this.deliverOutboxNormally(state, destinationKey, correlationId);
-
-    const secondAccepted = this.acceptInboxDelivery(state, payment.externalEventId);
-    this.integration(state, {
-      system: "NORTHSTAR_PROCESSOR",
-      direction: "INBOUND",
-      operation: "processor.payment.captured",
-      externalEventId: payment.externalEventId,
-      operationKey,
-      correlationId,
-      status: "DUPLICATE",
-      httpStatus: 200,
-      attempt: 2,
-      note: "The duplicate delivery was acknowledged but did not reapply financial state.",
-      sanitizedRequest: { eventId: payment.externalEventId, amountCents: payment.amountCents, currency: payment.currency },
-      sanitizedResponse: { accepted: true, replay: true },
-    });
-    this.updateCheck(state, "unique_event", "PASS", "2 deliveries → 1 mutation");
-    this.appendAudit(state, {
-      type: "DUPLICATE_EVENT_ABSORBED",
-      entityType: "payment",
-      entityId: payment.id,
-      actor: "processor-inbox",
-      correlationId,
-      summary: "Two webhook deliveries produced one allocation and one posting.",
-      details: { externalEventId: payment.externalEventId, firstAccepted, secondAccepted, financialMutations: 1 },
-    });
-
-    return {
-      deliveries: 2,
-      firstAccepted,
-      secondAccepted,
-      allocationsCreated: 1,
-      postingsCreated: 1,
-      databaseGuard: "UNIQUE (session_id, provider, external_event_id)",
-    };
-  }
-
-  private simulateLostResponse(state: DemoState): Record<string, unknown> {
-    const payment = this.requirePayment(state, "pay_1003");
-    const outbox = this.requireOutbox(state, `op_${state.session.id.slice(0, 8)}_${payment.id}`);
-    const correlationId = this.correlation(state, "lost_response");
-    const postingId = "OP-7Q3K";
-
-    outbox.attemptCount += 1;
-    state.invariants.dmsAttempts += 1;
-    state.invariants.dmsMutations += 1;
-    state.invariants.lostResponses += 1;
-    this.integration(state, {
-      system: "LEGACY_DMS",
-      direction: "OUTBOUND",
-      operation: "post-payment",
-      externalEventId: payment.externalEventId,
-      operationKey: outbox.operationKey,
-      correlationId,
-      status: "RESPONSE_LOST",
-      httpStatus: null,
-      attempt: 1,
-      note: "LegacyDMS committed the posting, but the caller observed a timeout instead of the success response.",
-      sanitizedRequest: { repairOrderNumber: "RO-8003", amountCents: payment.amountCents, operationKey: outbox.operationKey },
-      sanitizedResponse: { postingId, committed: true, deliveredToClient: false },
-    });
-
-    outbox.attemptCount += 1;
-    outbox.status = "DELIVERED";
-    outbox.deliveredAt = this.timestamp(state);
-    payment.status = "POSTED";
-    state.invariants.dmsAttempts += 1;
-    state.invariants.retriesResolvedByLookup += 1;
-    state.invariants.outboxDelivered += 1;
-    this.integration(state, {
-      system: "LEGACY_DMS",
-      direction: "OUTBOUND",
-      operation: "lookup-by-operation-key",
-      externalEventId: payment.externalEventId,
-      operationKey: outbox.operationKey,
-      correlationId,
-      status: "REPLAYED",
-      httpStatus: 200,
-      attempt: 2,
-      note: "The retry reused the key and retrieved the original committed result.",
-      sanitizedRequest: { operationKey: outbox.operationKey },
-      sanitizedResponse: { postingId, committed: true, replay: true },
-    });
-    this.updateCheck(state, "stable_key", "PASS", "2 attempts → OP-7Q3K once");
-    this.appendAudit(state, {
-      type: "LOST_RESPONSE_RECOVERED",
-      entityType: "outbox",
-      entityId: outbox.id,
-      actor: "outbox-relay",
-      correlationId,
-      summary: "A timeout after commit was recovered without a second DMS mutation.",
-      details: { attempts: 2, mutations: 1, operationKey: outbox.operationKey, postingId },
-    });
-
-    return {
-      attempts: 2,
-      destinationMutations: 1,
-      postingId,
-      operationKey: outbox.operationKey,
-      outcome: "original result retrieved",
-    };
-  }
-
-  private openAmbiguousException(state: DemoState): Record<string, unknown> {
-    const payment = this.requirePayment(state, "pay_1009");
-    const correlationId = this.correlation(state, "ambiguity");
-    this.acceptInboxDelivery(state, payment.externalEventId);
-    payment.status = "EXCEPTION";
-    const openedAt = this.timestamp(state);
-    const exception: DemoException = {
-      id: "exc_ambiguous_1009",
-      paymentId: payment.id,
-      type: "AMBIGUOUS_ALLOCATION",
-      severity: "BLOCKING",
-      status: "OPEN",
-      version: 1,
-      title: "One payment, two credible repair orders",
-      summary: "Amount and masked customer label match two open invoices; deterministic evidence is insufficient.",
-      openedAt,
-      candidates: [
-        {
-          invoiceId: "inv_8031",
-          repairOrderNumber: "RO-8031",
-          amountCents: 49_500,
-          score: 0.78,
-          reasons: ["Exact amount", "Same masked customer", "Within 31-minute window"],
-        },
-        {
-          invoiceId: "inv_8037",
-          repairOrderNumber: "RO-8037",
-          amountCents: 49_500,
-          score: 0.76,
-          reasons: ["Exact amount", "Same masked customer", "Within 33-minute window"],
-        },
-      ],
-      assistantNote: "Advisory only: both candidates are plausible. A repair-order reference or authorized human decision is required.",
-      resolution: null,
-    };
-    state.exceptions.push(exception);
-    state.close.status = "BLOCKED";
-    state.close.blockingExceptionCount = 1;
-    state.close.lastEvaluatedAt = openedAt;
-    this.appendAudit(state, {
-      type: "AMBIGUOUS_ALLOCATION_ESCALATED",
-      entityType: "exception",
-      entityId: exception.id,
-      actor: "matcher",
-      correlationId,
-      summary: "The matcher refused to guess between two credible candidates.",
-      details: { confidenceThreshold: 0.9, leadingScore: 0.78, assistantCanMutate: false },
-    });
-
-    return {
-      exceptionId: exception.id,
-      candidates: 2,
-      leadingScore: 0.78,
-      threshold: 0.9,
-      decision: "human review required",
-      aiAuthority: "read-only advisory",
-    };
-  }
-
-  private simulateResolutionRace(state: DemoState): Record<string, unknown> {
-    const exception = this.requireOpenException(state);
-    const expectedVersion = exception.version;
-    const winner = "Maya Chen";
-    const loser = "Jon Bell";
-    const operationKey = `resolve_${state.session.id.slice(0, 8)}_maya`;
-    const correlationId = this.correlation(state, "race");
-
-    state.invariants.concurrentDecisions += 2;
-    this.applyResolution(state, exception, {
-      operationKey,
-      expectedVersion,
-      candidateInvoiceId: "inv_8031",
-      acceptedAmountCents: 49_500,
-      reason: "Repair-order reference confirmed from the synthetic end-of-day worksheet.",
-      actor: winner,
-    }, correlationId);
-    state.invariants.rejectedVersionConflicts += 1;
-    this.appendAudit(state, {
-      type: "STALE_RESOLUTION_REJECTED",
-      entityType: "exception",
-      entityId: exception.id,
-      actor: loser,
-      correlationId,
-      summary: "A concurrent stale decision received HTTP 409 and the winning version.",
-      details: { expectedVersion, actualVersion: exception.version, status: 409, winner },
-    });
-    state.evidence.race = {
-      attempted: true,
-      winner,
-      loser,
-      acceptedStatus: 200,
-      rejectedStatus: 409,
-      winningVersion: exception.version,
-    };
-    this.updateCheck(state, "version_guard", "PASS", "200 winner / 409 stale writer");
-
-    return {
-      submittedAtSameVersion: expectedVersion,
-      winner: { actor: winner, status: 200, resultingVersion: exception.version },
-      loser: { actor: loser, status: 409, code: "VERSION_CONFLICT", observedWinner: winner },
-      allocationsCreated: 1,
-    };
-  }
-
-  private resolveException(state: DemoState, request: ActionRequest): EngineOutcome {
-    const exception = state.exceptions.find((item) => item.id === "exc_ambiguous_1009");
-    if (!exception) {
-      throw new DomainError("ACTION_OUT_OF_ORDER", "Open the ambiguous exception before resolving it.", 409, {
-        requiredAction: "open-ambiguous-exception",
-      });
-    }
-
-    const operationKey = request.operationKey ?? `resolve_${state.session.id.slice(0, 8)}_manual`;
-    if (exception.resolution?.operationKey === operationKey) {
-      this.assertIdenticalResolutionReplay(state, exception, request);
-      return {
-        changed: false,
-        replayed: true,
-        chapter: 5,
-        result: { exceptionId: exception.id, resolution: exception.resolution },
-      };
-    }
-    const expectedVersion = request.expectedVersion ?? exception.version;
-    if (exception.status === "RESOLVED" || expectedVersion !== exception.version) {
-      throw new VersionConflictError({
-        exceptionId: exception.id,
-        expectedVersion,
-        actualVersion: exception.version,
-        winningResolution: exception.resolution,
-      }, this.correlation(state, "resolution_conflict"));
-    }
-
-    const candidateInvoiceId = request.candidateInvoiceId ?? exception.candidates[0]?.invoiceId;
-    if (!candidateInvoiceId || !exception.candidates.some((candidate) => candidate.invoiceId === candidateInvoiceId)) {
-      throw new DomainError("INVALID_CANDIDATE", "Choose one of the evidence-backed invoice candidates.", 422, {
-        candidateInvoiceId: candidateInvoiceId ?? null,
-      });
-    }
-    const acceptedAmountCents = request.acceptedAmountCents ?? this.requirePayment(state, exception.paymentId).amountCents;
-    const correlationId = this.correlation(state, "manual_resolution");
-    this.applyResolution(state, exception, {
-      operationKey,
-      expectedVersion,
-      candidateInvoiceId,
-      acceptedAmountCents,
-      reason: request.reason ?? "Authorized reviewer confirmed the repair-order evidence.",
-      actor: request.actor ?? "Maya Chen",
-    }, correlationId);
-    if (!state.completedActions.includes("resolve-exception")) state.completedActions.push("resolve-exception");
-    this.setChapter(state, 5);
-    this.assertInvariants(state);
-    return {
-      changed: true,
-      replayed: false,
-      chapter: 5,
-      result: { exceptionId: exception.id, resolution: exception.resolution },
-    };
-  }
-
-  private assertIdenticalResolutionReplay(state: DemoState, exception: DemoException, request: ActionRequest): void {
-    const resolution = exception.resolution;
-    if (!resolution) return;
-    const conflictingFields: string[] = [];
-    if (request.expectedVersion !== undefined && request.expectedVersion !== exception.version - 1) {
-      conflictingFields.push("expectedVersion");
-    }
-    if (request.candidateInvoiceId !== undefined && request.candidateInvoiceId !== resolution.candidateInvoiceId) {
-      conflictingFields.push("candidateInvoiceId");
-    }
-    if (request.acceptedAmountCents !== undefined && request.acceptedAmountCents !== resolution.acceptedAmountCents) {
-      conflictingFields.push("acceptedAmountCents");
-    }
-    if (request.reason !== undefined && request.reason !== resolution.reason) conflictingFields.push("reason");
-    if (request.actor !== undefined && request.actor !== resolution.actor) conflictingFields.push("actor");
-    if (conflictingFields.length > 0) {
-      throw new DomainError(
-        "IDEMPOTENCY_KEY_REUSE",
-        "That operation key already belongs to a different resolution payload.",
-        409,
-        { operationKey: resolution.operationKey, conflictingFields },
-        this.correlation(state, "idempotency_reuse"),
-      );
-    }
-  }
-
-  private reconcileSettlement(state: DemoState): Record<string, unknown> {
-    if (state.exceptions.some((exception) => exception.severity === "BLOCKING" && exception.status === "OPEN")) {
-      throw new DomainError("CLOSE_BLOCKED", "Resolve every blocking exception before settlement close.", 409, {
-        blockingExceptions: state.exceptions.filter((item) => item.status === "OPEN").map((item) => item.id),
-      });
-    }
-    const correlationId = this.correlation(state, "settlement");
-    this.assertCloseOperationsComplete(state, correlationId);
-    const grossCents = state.payments
-      .filter((payment) => payment.kind === "CAPTURE")
-      .reduce((sum, payment) => sum + payment.amountCents, 0);
-    const refundCents = state.payments
-      .filter((payment) => payment.kind === "REFUND")
-      .reduce((sum, payment) => sum + payment.amountCents, 0);
-    const feeCents = state.settlementEvidence.processorFee.amountCents;
-    const expectedDepositCents = grossCents - feeCents - refundCents;
-    const bankDepositCents = state.settlementEvidence.bankDeposit.amountCents;
-    const varianceCents = expectedDepositCents - bankDepositCents;
-    const matched = varianceCents === 0;
-
-    state.totals.grossCents = grossCents;
-    state.totals.feeCents = feeCents;
-    state.totals.refundCents = refundCents;
-    state.totals.expectedDepositCents = expectedDepositCents;
-    state.totals.bankDepositCents = bankDepositCents;
-    state.totals.varianceCents = varianceCents;
-    state.close.status = matched ? "READY" : "BLOCKED";
-    state.close.blockingExceptionCount = 0;
-    state.close.lastEvaluatedAt = this.timestamp(state);
-    this.integration(state, {
-      system: "PRAIRIE_BANK",
-      direction: "INBOUND",
-      operation: "settlement.deposit.received",
-      externalEventId: state.settlementEvidence.bankDeposit.externalEventId,
-      operationKey: `settlement_${state.session.id.slice(0, 8)}_${state.settlementEvidence.bankDeposit.id}`,
-      correlationId,
-      status: matched ? "RECONCILED" : "REJECTED",
-      httpStatus: 200,
-      attempt: 1,
-      note: matched
-        ? "The independent synthetic bank deposit equals captures minus processor fees and refunds."
-        : "The independent synthetic bank deposit does not equal the expected settlement net.",
-      sanitizedRequest: {
-        depositRecordId: state.settlementEvidence.bankDeposit.id,
-        depositCents: bankDepositCents,
-        currency: state.totals.currency,
-      },
-      sanitizedResponse: { matched, expectedDepositCents, varianceCents },
-    });
-    this.updateCheck(
-      state,
-      "settlement",
-      matched ? "PASS" : "PENDING",
-      matched ? "$5,299.50 − $145.26 − $125.00 = $5,029.24" : `${varianceCents} cents variance; close blocked`,
-    );
-    this.appendAudit(state, {
-      type: matched ? "SETTLEMENT_RECONCILED" : "SETTLEMENT_VARIANCE_DETECTED",
-      entityType: "settlement",
-      entityId: "settlement_close",
-      actor: "reconciliation-engine",
-      correlationId,
-      summary: matched
-        ? "The independent deposit matched the expected net and the close became ready."
-        : "The independent deposit did not match the expected net, so the close remained blocked.",
-      details: {
-        processorFeeRecordId: state.settlementEvidence.processorFee.id,
-        bankDepositRecordId: state.settlementEvidence.bankDeposit.id,
-        grossCents,
-        feeCents,
-        refundCents,
-        expectedDepositCents,
-        bankDepositCents,
-        varianceCents,
-      },
-    });
-
-    return {
-      equation: "gross - fees - refunds = expected deposit",
-      grossCents,
-      feeCents,
-      refundCents,
-      expectedDepositCents,
-      bankDepositCents,
-      varianceCents,
-      matched,
-      closeStatus: state.close.status,
-    };
-  }
-
-  private applyResolution(
-    state: DemoState,
-    exception: DemoException,
-    request: ResolutionCommand,
-    correlationId: string,
-  ): void {
+    const exception = this.requireException(state, exceptionId);
     if (request.expectedVersion !== exception.version) {
-      throw new VersionConflictError({
-        exceptionId: exception.id,
+      return this.recordVersionConflict(state, {
+        scope,
+        idempotencyKey: request.idempotencyKey,
+        fingerprint,
+        entityType: "exception",
+        entityId: exception.id,
         expectedVersion: request.expectedVersion,
         actualVersion: exception.version,
-        winningResolution: exception.resolution,
-      }, correlationId);
-    }
-    const payment = this.requirePayment(state, exception.paymentId);
-    const invoice = this.requireInvoice(state, request.candidateInvoiceId);
-    const alreadyAllocated = state.allocations
-      .filter((allocation) => allocation.paymentId === payment.id)
-      .reduce((sum, allocation) => sum + allocation.amountCents, 0);
-    const paymentRemainderCents = payment.amountCents - alreadyAllocated;
-    if (request.acceptedAmountCents !== paymentRemainderCents) {
-      throw new DomainError(
-        "RESOLUTION_AMOUNT_MUST_EQUAL_PAYMENT_REMAINDER",
-        "This whole-payment demo requires the accepted amount to equal the payment remainder.",
-        422,
-        {
-          paymentId: payment.id,
-          acceptedAmountCents: request.acceptedAmountCents,
-          paymentRemainderCents,
+        message: "This item was already changed by another operation.",
+        extraDetails: {
+          winningActor: exception.resolution?.actor ?? null,
+          winningResolution: exception.resolution,
         },
-        correlationId,
+      });
+    }
+    if (exception.status !== "OPEN") {
+      throw new DomainError(
+        "EXCEPTION_ALREADY_RESOLVED",
+        "This exception is already resolved. Reload the latest record.",
+        409,
+        { exceptionId: exception.id, version: exception.version, resolution: exception.resolution },
       );
     }
-    if (request.acceptedAmountCents > invoice.balanceCents) {
-      throw new DomainError("ALLOCATION_EXCEEDS_BALANCE", "The accepted amount exceeds an available balance.", 422, {
-        paymentRemainderCents,
-        invoiceBalanceCents: invoice.balanceCents,
-      }, correlationId);
+
+    const candidate = exception.candidates.find((item) =>
+      item.targetId === request.targetId || item.id === request.targetId);
+    if (!candidate) {
+      throw new DomainError(
+        "INVALID_EXCEPTION_TARGET",
+        "Choose one of the evidence-backed records for this exception.",
+        422,
+        { exceptionId: exception.id, targetId: request.targetId },
+      );
     }
 
-    this.allocate(state, payment.id, invoice.id, request.acceptedAmountCents, "HUMAN_RESOLUTION", request.operationKey);
-    this.createOutbox(state, payment.id, invoice.id, request.operationKey);
-    this.deliverOutboxNormally(state, request.operationKey, correlationId);
+    const payment = this.requirePayment(state, exception.paymentId);
+    this.assertExceptionIdentity(exception, payment);
+    const commandAt = this.nextCommandTime(state);
+    const operationKey = this.operationKey("resolve", exception.id, request.idempotencyKey);
+    let effect: ResolutionEffect;
+
+    switch (exception.type) {
+      case "AMBIGUOUS_MATCH":
+        effect = this.resolveCaptureToRecord(state, exception, payment, candidate.targetId, operationKey, commandAt, "APPLY_TO_RECORD");
+        break;
+      case "SPLIT_ALLOCATION":
+        effect = this.resolveCaptureToRecord(state, exception, payment, candidate.targetId, operationKey, commandAt, "ATTACH_SPLIT");
+        break;
+      case "UNMATCHED_REFUND":
+        effect = this.resolveRefund(state, exception, payment, candidate.targetId, operationKey, commandAt);
+        break;
+      case "UNMATCHED_PAYMENT":
+      case "POSTING_STATUS_UNKNOWN":
+        throw new DomainError(
+          "UNSUPPORTED_EXCEPTION_RESOLUTION",
+          "This exception type does not have a configured deterministic resolution.",
+          422,
+          { exceptionId: exception.id, type: exception.type },
+        );
+    }
+
     exception.status = "RESOLVED";
     exception.version += 1;
     exception.resolution = {
-      candidateInvoiceId: request.candidateInvoiceId,
-      acceptedAmountCents: request.acceptedAmountCents,
-      actor: request.actor,
-      reason: request.reason,
-      operationKey: request.operationKey,
-      resolvedAt: this.timestamp(state),
+      action: effect.action,
+      targetId: effect.targetId,
+      targetLabel: effect.targetLabel,
+      amountCents: effect.amountCents,
+      actor: state.user.name,
+      reason: this.resolutionReason(exception, effect.targetLabel),
+      operationKey,
+      resolvedAt: effect.verifiedAt,
     };
-    state.close.status = "PROCESSING";
-    state.close.blockingExceptionCount = 0;
-    state.close.lastEvaluatedAt = this.timestamp(state);
     state.invariants.acceptedDecisions += 1;
+
+    const close = this.recalculateLocationClose(state, exception.rooftopId);
+    const result: Record<string, unknown> = {
+      exceptionId: exception.id,
+      status: exception.status,
+      version: exception.version,
+      resolution: exception.resolution,
+      paymentId: payment.id,
+      dmsState: payment.dmsState,
+      locationClose: close,
+    };
     this.appendAudit(state, {
       type: "EXCEPTION_RESOLVED",
       entityType: "exception",
       entityId: exception.id,
-      actor: request.actor,
-      correlationId,
-      summary: `${request.actor} resolved the ambiguous payment without editing prior evidence.`,
+      actor: state.user.name,
+      occurredAt: effect.verifiedAt,
+      correlationId: this.correlationId(exception.id, request.idempotencyKey),
+      summary: this.resolutionSummary(exception, payment, effect.targetLabel),
       details: {
         previousVersion: request.expectedVersion,
         resultingVersion: exception.version,
-        candidateInvoiceId: request.candidateInvoiceId,
-        acceptedAmountCents: request.acceptedAmountCents,
-        operationKey: request.operationKey,
+        paymentId: payment.id,
+        targetId: effect.targetId,
+        targetLabel: effect.targetLabel,
+        amountCents: effect.amountCents,
+        operationKey,
+        postingVerified: true,
       },
     });
+    this.recordCommand(state, request.idempotencyKey, scope, fingerprint, result, effect.verifiedAt);
+    this.assertInvariants(state);
+    return { changed: true, replayed: false, result };
   }
 
-  private allocate(
-    state: DemoState,
-    paymentId: string,
-    invoiceId: string,
-    amountCents: number,
-    source: Allocation["source"],
-    operationKey: string,
-  ): Allocation {
-    const existing = state.allocations.find((allocation) => allocation.operationKey === operationKey);
-    if (existing) {
-      if (
-        existing.paymentId === paymentId &&
-        existing.invoiceId === invoiceId &&
-        existing.amountCents === amountCents &&
-        existing.source === source
-      ) {
-        return existing;
-      }
-      throw new DomainError(
-        "IDEMPOTENCY_KEY_REUSE",
-        "That operation key already belongs to a different allocation payload.",
-        409,
-        { operationKey, existingPaymentId: existing.paymentId, requestedPaymentId: paymentId },
-      );
-    }
-    const payment = this.requirePayment(state, paymentId);
-    const invoice = this.requireInvoice(state, invoiceId);
-    const alreadyFromPayment = state.allocations
-      .filter((allocation) => allocation.paymentId === paymentId)
-      .reduce((sum, allocation) => sum + allocation.amountCents, 0);
-    if (amountCents > payment.amountCents - alreadyFromPayment || amountCents > invoice.balanceCents) {
-      throw new DomainError("ALLOCATION_EXCEEDS_BALANCE", "An allocation cannot exceed the payment remainder or invoice balance.", 422, {
-        paymentId,
-        invoiceId,
-        amountCents,
+  closeLocation(
+    state: WorkspaceState,
+    rooftopId: string,
+    request: CloseLocationRequest,
+  ): EngineOutcome {
+    const scope = `close:${rooftopId}:${WORKSPACE_BUSINESS_DATE}`;
+    const fingerprint = this.fingerprint(scope, { expectedVersion: request.expectedVersion });
+    const replay = this.replayCommand(state, request.idempotencyKey, scope, fingerprint);
+    if (replay) return replay;
+
+    const close = this.requireClose(state, rooftopId);
+    if (request.expectedVersion !== close.version) {
+      return this.recordVersionConflict(state, {
+        scope,
+        idempotencyKey: request.idempotencyKey,
+        fingerprint,
+        entityType: "operational_close",
+        entityId: close.id,
+        expectedVersion: request.expectedVersion,
+        actualVersion: close.version,
+        message: "This location close changed before the request was applied.",
+        extraDetails: { status: close.status, closedBy: close.closedBy, closedAt: close.closedAt },
       });
     }
-    const allocation: Allocation = {
-      id: `alloc_${String(state.allocations.length + 1).padStart(4, "0")}`,
-      paymentId,
-      invoiceId,
-      amountCents,
-      source,
-      operationKey,
-      createdAt: this.timestamp(state),
+    if (close.status === "CLOSED") {
+      throw new DomainError(
+        "LOCATION_ALREADY_CLOSED",
+        "This location is already closed. Reload the latest close record.",
+        409,
+        { rooftopId, closedBy: close.closedBy, closedAt: close.closedAt },
+      );
+    }
+
+    const proof = this.computeCloseProof(state, rooftopId);
+    if (proof.status !== "READY") {
+      throw new DomainError(
+        "CLOSE_BLOCKED",
+        "Resolve all operational work and verify every posting before closing this location.",
+        409,
+        {
+          rooftopId,
+          paymentCount: proof.paymentCount,
+          verifiedPostingCount: proof.verifiedPostingCount,
+          blockingExceptionCount: proof.blockingExceptionCount,
+          settlementStatus: proof.settlementStatus,
+        },
+      );
+    }
+
+    const closedAt = this.nextCommandTime(state);
+    close.paymentCount = proof.paymentCount;
+    close.verifiedPostingCount = proof.verifiedPostingCount;
+    close.blockingExceptionCount = proof.blockingExceptionCount;
+    close.settlementStatus = proof.settlementStatus;
+    close.status = "CLOSED";
+    close.version += 1;
+    close.closedBy = state.user.name;
+    close.closedAt = closedAt;
+    close.attestation = {
+      paymentCount: proof.paymentCount,
+      verifiedPostingCount: proof.verifiedPostingCount,
+      blockingExceptionCount: proof.blockingExceptionCount,
+      settlementStatusAtClose: proof.settlementStatus,
     };
-    state.allocations.push(allocation);
-    invoice.balanceCents -= amountCents;
-    invoice.status = invoice.balanceCents === 0 ? "PAID" : "PARTIAL";
-    payment.status = "MATCHED";
-    return allocation;
+
+    const rooftop = this.requireRooftop(state, rooftopId);
+    const result: Record<string, unknown> = {
+      rooftopId,
+      status: close.status,
+      version: close.version,
+      closedBy: close.closedBy,
+      closedAt: close.closedAt,
+      attestation: close.attestation,
+    };
+    this.appendAudit(state, {
+      type: "LOCATION_CLOSED",
+      entityType: "operational_close",
+      entityId: close.id,
+      actor: state.user.name,
+      occurredAt: closedAt,
+      correlationId: this.correlationId(close.id, request.idempotencyKey),
+      summary: `Closed ${rooftop.name}`,
+      details: {
+        rooftopId,
+        businessDate: close.businessDate,
+        paymentCount: proof.paymentCount,
+        verifiedPostingCount: proof.verifiedPostingCount,
+        blockingExceptionCount: proof.blockingExceptionCount,
+        settlementStatusAtClose: proof.settlementStatus,
+        payoutPendingWasNormal: proof.settlementStatus === "PAYOUT_PENDING",
+      },
+    });
+    this.recordCommand(state, request.idempotencyKey, scope, fingerprint, result, closedAt);
+    this.assertInvariants(state);
+    return { changed: true, replayed: false, result };
   }
 
-  private createOutbox(state: DemoState, paymentId: string, invoiceId: string, operationKey: string): OutboxItem {
-    const existing = state.outbox.find((item) => item.operationKey === operationKey);
-    if (existing) {
-      if (existing.paymentId === paymentId && existing.invoiceId === invoiceId && existing.destination === "LEGACY_DMS") {
-        return existing;
+  recordAdjustment(
+    state: WorkspaceState,
+    payoutId: string,
+    request: SettlementAdjustmentRequest,
+  ): EngineOutcome {
+    const scope = `payout:${payoutId}:adjustment`;
+    const fingerprint = this.fingerprint(scope, {
+      expectedVersion: request.expectedVersion,
+      amountCents: request.amountCents,
+      code: request.code,
+      evidenceRecordId: request.evidenceRecordId,
+      note: request.note ?? null,
+    });
+    const replay = this.replayCommand(state, request.idempotencyKey, scope, fingerprint);
+    if (replay) return replay;
+
+    const payout = this.requirePayout(state, payoutId);
+    if (request.expectedVersion !== payout.version) {
+      return this.recordVersionConflict(state, {
+        scope,
+        idempotencyKey: request.idempotencyKey,
+        fingerprint,
+        entityType: "processor_payout",
+        entityId: payout.id,
+        expectedVersion: request.expectedVersion,
+        actualVersion: payout.version,
+        message: "This payout changed before the adjustment was applied.",
+        extraDetails: { status: payout.status, varianceCents: payout.varianceCents },
+      });
+    }
+    if (payout.status === "RECONCILED") {
+      throw new DomainError(
+        "PAYOUT_ALREADY_RECONCILED",
+        "This payout is already reconciled.",
+        409,
+        { payoutId, reconciledBy: payout.reconciledBy, reconciledAt: payout.reconciledAt },
+      );
+    }
+    if (payout.status !== "VARIANCE") {
+      throw new DomainError(
+        "PAYOUT_NOT_ADJUSTABLE",
+        "Only a payout with a supported variance can be adjusted.",
+        422,
+        { payoutId, status: payout.status },
+      );
+    }
+
+    const evidence = state.payoutSourceRecords.find((item) => item.id === request.evidenceRecordId);
+    if (
+      !evidence ||
+      evidence.payoutId !== payout.id ||
+      evidence.component !== "NETWORK_ASSESSMENT_NOTICE" ||
+      evidence.amountCents !== request.amountCents
+    ) {
+      throw new DomainError(
+        "INVALID_ADJUSTMENT_EVIDENCE",
+        "The adjustment must match the payout's stored network-assessment evidence.",
+        422,
+        { payoutId, evidenceRecordId: request.evidenceRecordId, amountCents: request.amountCents },
+      );
+    }
+    if (state.settlementAdjustments.some((item) => item.evidenceRecordId === evidence.id)) {
+      throw new DomainError(
+        "ADJUSTMENT_EVIDENCE_ALREADY_USED",
+        "This source evidence already supports a recorded adjustment.",
+        409,
+        { payoutId, evidenceRecordId: evidence.id },
+      );
+    }
+    if (payout.originalExpectedCents === null || payout.observedBankCents === null) {
+      throw new DomainError(
+        "PAYOUT_COMPONENTS_INCOMPLETE",
+        "Expected and observed payout amounts are required before recording an adjustment.",
+        422,
+        { payoutId },
+      );
+    }
+
+    const createdAt = this.nextCommandTime(state);
+    const operationKey = this.operationKey("adjust", payout.id, request.idempotencyKey);
+    state.settlementAdjustments.push({
+      id: `adjustment_${payout.id}_${String(state.settlementAdjustments.length + 1).padStart(2, "0")}`,
+      payoutId: payout.id,
+      amountCents: request.amountCents,
+      code: request.code,
+      reason: "Network assessment adjustment supported by processor settlement evidence.",
+      evidenceRecordId: evidence.id,
+      note: request.note ?? null,
+      actor: state.user.name,
+      operationKey,
+      createdAt,
+    });
+
+    const adjustmentTotalCents = this.sum(
+      state.settlementAdjustments.filter((item) => item.payoutId === payout.id),
+      (item) => item.amountCents,
+    );
+    payout.adjustedExpectedCents = payout.originalExpectedCents + adjustmentTotalCents;
+    payout.varianceCents = payout.adjustedExpectedCents - payout.observedBankCents;
+    payout.status = payout.varianceCents === 0 ? "RECONCILED" : "VARIANCE";
+    payout.version += 1;
+    payout.reconciledBy = payout.status === "RECONCILED" ? state.user.name : null;
+    payout.reconciledAt = payout.status === "RECONCILED" ? createdAt : null;
+
+    const rooftop = this.requireRooftop(state, payout.rooftopId);
+    const result: Record<string, unknown> = {
+      payoutId: payout.id,
+      status: payout.status,
+      version: payout.version,
+      originalExpectedCents: payout.originalExpectedCents,
+      adjustmentTotalCents,
+      adjustedExpectedCents: payout.adjustedExpectedCents,
+      observedBankCents: payout.observedBankCents,
+      varianceCents: payout.varianceCents,
+      reconciledBy: payout.reconciledBy,
+      reconciledAt: payout.reconciledAt,
+    };
+    this.appendAudit(state, {
+      type: "SETTLEMENT_ADJUSTMENT_RECORDED",
+      entityType: "processor_payout",
+      entityId: payout.id,
+      actor: state.user.name,
+      occurredAt: createdAt,
+      correlationId: this.correlationId(payout.id, request.idempotencyKey),
+      summary: `Recorded -$25.00 network assessment adjustment for ${rooftop.name}`,
+      details: {
+        payoutId: payout.id,
+        evidenceRecordId: evidence.id,
+        originalExpectedCents: payout.originalExpectedCents,
+        adjustmentCents: request.amountCents,
+        adjustedExpectedCents: payout.adjustedExpectedCents,
+        observedBankCents: payout.observedBankCents,
+        varianceCents: payout.varianceCents,
+        operationKey,
+      },
+    });
+    this.recordCommand(state, request.idempotencyKey, scope, fingerprint, result, createdAt);
+    this.assertInvariants(state);
+    return { changed: true, replayed: false, result };
+  }
+
+  assertInvariants(state: WorkspaceState): void {
+    const fridayPayments = state.payments.filter((payment) =>
+      payment.inFridayClose && payment.businessDate === WORKSPACE_BUSINESS_DATE);
+    this.invariant(fridayPayments.length === 62, "Friday close must contain exactly 62 payments");
+    this.invariant(state.rooftops.length === 3, "Workspace must contain exactly three rooftops");
+
+    for (const [rooftopId, expected] of Object.entries(FIXTURE_TOTALS)) {
+      const payments = fridayPayments.filter((payment) => payment.rooftopId === rooftopId);
+      const signedTotal = this.sum(payments, (payment) =>
+        payment.kind === "REFUND" ? -payment.amountCents : payment.amountCents);
+      this.invariant(payments.length === expected.count, `${rooftopId} payment count changed`);
+      this.invariant(signedTotal === expected.signedTotalCents, `${rooftopId} processed total changed`);
+      const departments = FIXTURE_DEPARTMENTS[rooftopId]!;
+      for (const department of ["SERVICE", "PARTS", "SALES"] as const) {
+        this.invariant(
+          payments.filter((payment) => payment.department === department).length === departments[department],
+          `${rooftopId} ${department.toLowerCase()} payment distribution changed`,
+        );
       }
-      throw new DomainError(
-        "IDEMPOTENCY_KEY_REUSE",
-        "That operation key already belongs to a different outbound posting payload.",
-        409,
-        { operationKey, existingPaymentId: existing.paymentId, requestedPaymentId: paymentId },
-      );
     }
-    const item: OutboxItem = {
-      id: `out_${String(state.outbox.length + 1).padStart(4, "0")}`,
-      paymentId,
-      invoiceId,
-      operationKey,
-      destination: "LEGACY_DMS",
-      status: "PENDING",
-      attemptCount: 0,
-      createdAt: this.timestamp(state),
-      deliveredAt: null,
-    };
-    state.outbox.push(item);
-    state.invariants.outboxCreated += 1;
-    return item;
+
+    const cents = [
+      ...state.payments.map((item) => item.amountCents),
+      ...state.dmsRecords.flatMap((item) => [item.customerPayCents, item.balanceCents]),
+      ...state.allocations.map((item) => item.amountCents),
+      ...state.payouts.flatMap((item) => [
+        item.capturedCents,
+        item.refundCents,
+        item.feeCents,
+        item.originalExpectedCents,
+        item.adjustedExpectedCents,
+        item.observedBankCents,
+        item.varianceCents,
+      ]).filter((item): item is number => item !== null),
+      ...state.payoutSourceRecords.map((item) => item.amountCents),
+      ...state.settlementAdjustments.map((item) => item.amountCents),
+    ];
+    this.invariant(cents.every(Number.isInteger), "Every monetary value must use integer cents");
+    this.invariant(state.payments.every((item) => item.amountCents > 0), "Payments store positive absolute cents");
+
+    this.assertUnique(state.payments.map((item) => item.id), "payment ids");
+    this.assertUnique(state.payments.map((item) => `${item.provider}:${item.externalEventId}`), "processor event ids");
+    this.assertUnique(state.dmsRecords.map((item) => item.id), "DMS record ids");
+    this.assertUnique(state.allocations.map((item) => item.id), "allocation ids");
+    this.assertUnique(state.allocations.map((item) => item.operationKey), "allocation operation keys");
+    this.assertUnique(state.refundLinks.map((item) => item.refundPaymentId), "refund payment links");
+    this.assertUnique(state.refundLinks.map((item) => item.operationKey), "refund operation keys");
+    this.assertUnique(state.outbox.map((item) => item.id), "outbox ids");
+    this.assertUnique(state.outbox.map((item) => item.operationKey), "outbox operation keys");
+    this.assertUnique(state.exceptions.map((item) => item.id), "exception ids");
+    this.assertUnique(state.operationalCloses.map((item) => `${item.rooftopId}:${item.businessDate}`), "location closes");
+    this.assertUnique(state.payouts.map((item) => item.id), "payout ids");
+    this.assertUnique(state.payoutSourceRecords.map((item) => item.id), "payout source ids");
+    this.assertUnique(state.settlementAdjustments.map((item) => item.id), "adjustment ids");
+    this.assertUnique(state.settlementAdjustments.map((item) => item.operationKey), "adjustment operation keys");
+    this.assertUnique(state.commandReceipts.map((item) => item.idempotencyKey), "command idempotency keys");
+
+    const receiptKeys = new Set(state.inbox.map((item) => `${item.provider}:${item.externalEventId}`));
+    this.invariant(receiptKeys.size === state.inbox.length, "Inbox receipts must be unique");
+    for (const payment of fridayPayments) {
+      this.invariant(receiptKeys.has(`${payment.provider}:${payment.externalEventId}`), `Inbox receipt missing for ${payment.id}`);
+    }
+    const receivedDeliveries = this.sum(state.inbox, (item) => item.deliveryCount);
+    const duplicateDeliveries = this.sum(state.inbox, (item) => item.deliveryCount - 1);
+    this.invariant(state.invariants.processorDeliveriesReceived === receivedDeliveries, "Processor delivery counter drifted");
+    this.invariant(state.invariants.uniqueProcessorEventsApplied === state.inbox.length, "Unique processor event counter drifted");
+    this.invariant(state.invariants.duplicateDeliveriesIgnored === duplicateDeliveries, "Duplicate delivery counter drifted");
+
+    for (const allocation of state.allocations) {
+      const payment = this.requirePayment(state, allocation.paymentId);
+      const record = this.requireDmsRecord(state, allocation.dmsRecordId);
+      this.invariant(payment.rooftopId === record.rooftopId, `Cross-rooftop allocation ${allocation.id}`);
+      this.invariant(payment.department === record.department, `Cross-department allocation ${allocation.id}`);
+      this.invariant(payment.currency === record.currency, `Cross-currency allocation ${allocation.id}`);
+    }
+    for (const payment of state.payments) {
+      const allocatedCents = this.sum(
+        state.allocations.filter((item) => item.paymentId === payment.id),
+        (item) => item.amountCents,
+      );
+      this.invariant(allocatedCents <= payment.amountCents, `Payment ${payment.id} is over-allocated`);
+      if (payment.inFridayClose && payment.kind === "CAPTURE" && payment.dmsState === "VERIFIED") {
+        this.invariant(allocatedCents === payment.amountCents, `Verified capture ${payment.id} is not fully allocated`);
+        this.invariant(payment.postingOperationKey !== null, `Verified capture ${payment.id} has no operation key`);
+        this.invariant(payment.postedAt !== null && payment.verifiedAt !== null, `Verified capture ${payment.id} lacks posting timestamps`);
+        this.invariant(
+          state.outbox.some((item) =>
+            item.paymentId === payment.id &&
+            item.operationKey === payment.postingOperationKey &&
+            item.status === "DELIVERED"),
+          `Verified capture ${payment.id} lacks delivered posting intent`,
+        );
+      }
+      if (payment.inFridayClose && payment.kind === "REFUND" && payment.dmsState === "VERIFIED") {
+        this.invariant(
+          state.refundLinks.filter((item) => item.refundPaymentId === payment.id).length === 1,
+          `Verified refund ${payment.id} must have exactly one original link`,
+        );
+        this.invariant(
+          state.outbox.some((item) =>
+            item.paymentId === payment.id &&
+            item.operationKey === payment.postingOperationKey &&
+            item.status === "DELIVERED"),
+          `Verified refund ${payment.id} lacks delivered posting intent`,
+        );
+      }
+    }
+    for (const record of state.dmsRecords) {
+      this.invariant(record.balanceCents >= 0 && record.balanceCents <= record.customerPayCents, `Invalid balance on ${record.id}`);
+      const allocations = state.allocations.filter((item) => item.dmsRecordId === record.id);
+      const allocatedCents = this.sum(allocations, (item) => item.amountCents);
+      this.invariant(allocatedCents <= record.customerPayCents, `DMS record ${record.id} is over-allocated`);
+      if (allocations.length > 0) {
+        this.invariant(
+          record.balanceCents === record.customerPayCents - allocatedCents,
+          `DMS record balance drifted for ${record.id}`,
+        );
+      }
+    }
+
+    for (const link of state.refundLinks) {
+      const refund = this.requirePayment(state, link.refundPaymentId);
+      const original = this.requirePayment(state, link.originalPaymentId);
+      const record = this.requireDmsRecord(state, link.dmsRecordId);
+      this.invariant(refund.kind === "REFUND" && original.kind === "CAPTURE", `Invalid refund relationship ${link.id}`);
+      this.invariant(refund.rooftopId === original.rooftopId && original.rooftopId === record.rooftopId, `Cross-rooftop refund ${link.id}`);
+      this.invariant(refund.department === original.department && original.department === record.department, `Cross-department refund ${link.id}`);
+      this.invariant(original.linkedRecordId === record.id, `Refund ${link.id} points to the wrong DMS record`);
+      this.invariant(refund.amountCents <= original.amountCents, `Refund ${link.id} exceeds its original payment`);
+    }
+    for (const original of state.payments.filter((item) => item.kind === "CAPTURE")) {
+      const linkedRefundCents = this.sum(
+        state.refundLinks.filter((item) => item.originalPaymentId === original.id),
+        (item) => this.requirePayment(state, item.refundPaymentId).amountCents,
+      );
+      this.invariant(linkedRefundCents <= original.amountCents, `Refunds exceed original payment ${original.id}`);
+    }
+
+    for (const item of state.outbox) {
+      if (item.mutationKind === "PAYMENT_POST") {
+        this.invariant(
+          state.allocations.some((allocation) =>
+            allocation.paymentId === item.paymentId &&
+            allocation.dmsRecordId === item.dmsRecordId &&
+            allocation.operationKey === item.operationKey),
+          `Payment outbox ${item.id} has no matching allocation`,
+        );
+      } else {
+        this.invariant(
+          state.refundLinks.some((link) =>
+            link.refundPaymentId === item.paymentId &&
+            link.dmsRecordId === item.dmsRecordId &&
+            link.operationKey === item.operationKey),
+          `Refund outbox ${item.id} has no matching refund link`,
+        );
+      }
+      if (item.status === "DELIVERED") {
+        const committed = state.integrationAttempts.filter((attempt) =>
+          attempt.system === "LEGACY_DMS" &&
+          attempt.operationKey === item.operationKey &&
+          (attempt.status === "COMMITTED" ||
+            (attempt.status === "RESPONSE_LOST" && attempt.sanitizedResponse?.committed === true)));
+        this.invariant(committed.length === 1, `Delivered outbox ${item.id} must have one DMS mutation`);
+      }
+    }
+
+    const dmsAttempts = state.integrationAttempts.filter((item) => item.system === "LEGACY_DMS");
+    const dmsMutations = dmsAttempts.filter((item) =>
+      item.status === "COMMITTED" ||
+      (item.status === "RESPONSE_LOST" && item.sanitizedResponse?.committed === true));
+    this.invariant(state.invariants.dmsAttempts === dmsAttempts.length, "DMS attempt counter drifted");
+    this.invariant(state.invariants.dmsMutations === dmsMutations.length, "DMS mutation counter drifted");
+    this.invariant(
+      state.invariants.lostResponses === dmsAttempts.filter((item) => item.status === "RESPONSE_LOST").length,
+      "Lost-response counter drifted",
+    );
+    this.invariant(
+      state.invariants.retriesResolvedByLookup === dmsAttempts.filter((item) => item.status === "FOUND_EXISTING").length,
+      "Recovery-lookup counter drifted",
+    );
+    this.invariant(state.invariants.outboxCreated === state.outbox.length, "Outbox creation counter drifted");
+    this.invariant(
+      state.invariants.outboxDelivered === state.outbox.filter((item) => item.status === "DELIVERED").length,
+      "Outbox delivery counter drifted",
+    );
+
+    const duplicateFixture = this.requirePayment(state, "PAY-1006");
+    const duplicateReceipt = state.inbox.find((item) => item.externalEventId === duplicateFixture.externalEventId);
+    this.invariant(duplicateReceipt?.deliveryCount === 2, "PAY-1006 must retain two processor deliveries");
+    this.invariant(
+      state.allocations.filter((item) => item.paymentId === duplicateFixture.id).length === 1,
+      "PAY-1006 duplicate delivery must retain one allocation",
+    );
+    this.invariant(
+      !state.exceptions.some((item) => item.paymentId === duplicateFixture.id),
+      "PAY-1006 duplicate delivery must not become operator work",
+    );
+    const recoveredFixture = this.requirePayment(state, "PAY-1017");
+    const recoveredAttempts = dmsAttempts.filter((item) => item.operationKey === recoveredFixture.postingOperationKey);
+    this.invariant(recoveredAttempts.length === 2, "PAY-1017 must retain its two recovery attempts");
+    this.invariant(new Set(recoveredAttempts.map((item) => item.operationKey)).size === 1, "PAY-1017 recovery key changed");
+    this.invariant(
+      recoveredAttempts.filter((item) =>
+        item.status === "COMMITTED" ||
+        (item.status === "RESPONSE_LOST" && item.sanitizedResponse?.committed === true)).length === 1,
+      "PAY-1017 recovery must retain one financial mutation",
+    );
+    this.invariant(recoveredFixture.dmsState === "VERIFIED", "PAY-1017 must remain verified");
+    this.invariant(
+      !state.exceptions.some((item) => item.paymentId === recoveredFixture.id),
+      "PAY-1017 recovery must not become operator work",
+    );
+
+    for (const exception of state.exceptions) {
+      const payment = this.requirePayment(state, exception.paymentId);
+      this.assertExceptionIdentity(exception, payment);
+      if (exception.status === "OPEN") {
+        this.invariant(exception.resolution === null, `Open exception ${exception.id} has a resolution`);
+        this.invariant(payment.dmsState === "NEEDS_REVIEW", `Open exception ${exception.id} payment is not in review`);
+        continue;
+      }
+      const resolution = exception.resolution;
+      this.invariant(resolution !== null, `Resolved exception ${exception.id} has no resolution`);
+      if (!resolution) continue;
+      this.invariant(payment.dmsState === "VERIFIED", `Resolved exception ${exception.id} was not verified`);
+      if (exception.type === "UNMATCHED_REFUND") {
+        this.invariant(
+          state.refundLinks.some((link) =>
+            link.refundPaymentId === payment.id &&
+            link.originalPaymentId === resolution.targetId &&
+            link.operationKey === resolution.operationKey),
+          `Resolved refund ${exception.id} lacks its immutable link`,
+        );
+      } else {
+        this.invariant(
+          state.allocations.some((allocation) =>
+            allocation.paymentId === payment.id &&
+            allocation.dmsRecordId === resolution.targetId &&
+            allocation.amountCents === resolution.amountCents &&
+            allocation.source === "HUMAN_RESOLUTION" &&
+            allocation.operationKey === resolution.operationKey),
+          `Resolved exception ${exception.id} lacks its allocation`,
+        );
+      }
+    }
+    this.invariant(
+      state.invariants.acceptedDecisions === state.exceptions.filter((item) => item.status === "RESOLVED").length,
+      "Accepted decision counter drifted",
+    );
+    this.invariant(
+      state.invariants.rejectedVersionConflicts === state.auditEvents.filter((item) => item.type === "STALE_VERSION_CONFLICT").length,
+      "Rejected version-conflict counter drifted",
+    );
+
+    for (const close of state.operationalCloses) {
+      if (close.status === "CLOSED") {
+        this.invariant(close.closedBy !== null && close.closedAt !== null && close.attestation !== null, `Closed location ${close.id} lacks attestation`);
+        if (close.attestation) {
+          this.invariant(close.paymentCount === close.attestation.paymentCount, `Closed payment count changed for ${close.id}`);
+          this.invariant(close.verifiedPostingCount === close.attestation.verifiedPostingCount, `Closed verified count changed for ${close.id}`);
+          this.invariant(close.blockingExceptionCount === close.attestation.blockingExceptionCount, `Closed blocker count changed for ${close.id}`);
+          this.invariant(close.settlementStatus === close.attestation.settlementStatusAtClose, `Closed settlement snapshot changed for ${close.id}`);
+          this.invariant(close.attestation.paymentCount === close.attestation.verifiedPostingCount, `Closed location ${close.id} was not fully verified`);
+          this.invariant(close.attestation.blockingExceptionCount === 0, `Closed location ${close.id} retained blockers`);
+        }
+      } else {
+        const proof = this.computeCloseProof(state, close.rooftopId);
+        this.invariant(close.paymentCount === proof.paymentCount, `Close payment count drifted for ${close.id}`);
+        this.invariant(close.verifiedPostingCount === proof.verifiedPostingCount, `Close verified count drifted for ${close.id}`);
+        this.invariant(close.blockingExceptionCount === proof.blockingExceptionCount, `Close blocker count drifted for ${close.id}`);
+        this.invariant(close.settlementStatus === proof.settlementStatus, `Close settlement status drifted for ${close.id}`);
+        this.invariant(close.status === proof.status, `Close readiness drifted for ${close.id}`);
+      }
+    }
+
+    for (const payout of state.payouts) {
+      if (
+        payout.capturedCents !== null &&
+        payout.refundCents !== null &&
+        payout.feeCents !== null
+      ) {
+        this.invariant(
+          payout.originalExpectedCents === payout.capturedCents - payout.refundCents - payout.feeCents,
+          `Original settlement arithmetic changed for ${payout.id}`,
+        );
+      }
+      const adjustments = state.settlementAdjustments.filter((item) => item.payoutId === payout.id);
+      if (payout.originalExpectedCents !== null) {
+        const adjusted = payout.originalExpectedCents + this.sum(adjustments, (item) => item.amountCents);
+        this.invariant(payout.adjustedExpectedCents === adjusted, `Adjusted expected amount drifted for ${payout.id}`);
+        if (payout.observedBankCents !== null) {
+          this.invariant(payout.varianceCents === adjusted - payout.observedBankCents, `Payout variance drifted for ${payout.id}`);
+        }
+      }
+      if (payout.status === "RECONCILED") {
+        this.invariant(payout.varianceCents === 0, `Reconciled payout ${payout.id} has nonzero variance`);
+        this.invariant(payout.reconciledBy !== null && payout.reconciledAt !== null, `Reconciled payout ${payout.id} lacks attribution`);
+      }
+      if (payout.status === "VARIANCE") {
+        this.invariant(payout.varianceCents !== null && payout.varianceCents !== 0, `Variance payout ${payout.id} has no variance`);
+      }
+      for (const sourceId of payout.sourceRecordIds) {
+        const source = state.payoutSourceRecords.find((item) => item.id === sourceId);
+        this.invariant(source?.payoutId === payout.id, `Payout source ${sourceId} is missing or mis-scoped`);
+      }
+    }
+    for (const source of state.payoutSourceRecords) {
+      this.invariant(state.payouts.some((item) => item.id === source.payoutId), `Orphan payout source ${source.id}`);
+    }
+    for (const adjustment of state.settlementAdjustments) {
+      const source = state.payoutSourceRecords.find((item) => item.id === adjustment.evidenceRecordId);
+      this.invariant(source?.payoutId === adjustment.payoutId, `Adjustment ${adjustment.id} has invalid evidence`);
+      this.invariant(source?.component === "NETWORK_ASSESSMENT_NOTICE", `Adjustment ${adjustment.id} lacks assessment evidence`);
+      this.invariant(source?.amountCents === adjustment.amountCents, `Adjustment ${adjustment.id} changed the source amount`);
+    }
+    this.assertUnique(state.settlementAdjustments.map((item) => item.evidenceRecordId), "adjustment evidence records");
+    this.invariant(
+      state.auditEvents.every((event, index) => event.sequence === index + 1),
+      "Audit event sequence must be contiguous and append-only",
+    );
   }
 
-  private deliverOutboxNormally(state: DemoState, operationKey: string, correlationId: string): void {
-    const outbox = this.requireOutbox(state, operationKey);
-    if (outbox.status === "DELIVERED") return;
-    const payment = this.requirePayment(state, outbox.paymentId);
-    const invoice = this.requireInvoice(state, outbox.invoiceId);
-    const allocatedCents = state.allocations
-      .filter((allocation) => allocation.paymentId === payment.id)
-      .reduce((sum, allocation) => sum + allocation.amountCents, 0);
-    if (allocatedCents !== payment.amountCents) {
+  private resolveCaptureToRecord(
+    state: WorkspaceState,
+    exception: DemoException,
+    payment: Payment,
+    targetId: string,
+    operationKey: string,
+    commandAt: string,
+    action: "APPLY_TO_RECORD" | "ATTACH_SPLIT",
+  ): ResolutionEffect {
+    if (payment.kind !== "CAPTURE") {
+      throw new DomainError("INVALID_PAYMENT_KIND", "This resolution requires a captured payment.", 422, {
+        exceptionId: exception.id, paymentId: payment.id, kind: payment.kind,
+      });
+    }
+    const record = this.requireDmsRecord(state, targetId);
+    this.assertCompatibleTarget(payment, record);
+    const alreadyAllocated = this.sum(
+      state.allocations.filter((item) => item.paymentId === payment.id),
+      (item) => item.amountCents,
+    );
+    const paymentRemainder = payment.amountCents - alreadyAllocated;
+    if (paymentRemainder <= 0) {
+      throw new DomainError("PAYMENT_ALREADY_ALLOCATED", "This payment is already fully allocated.", 409, { paymentId: payment.id });
+    }
+    if (paymentRemainder > record.balanceCents) {
       throw new DomainError(
-        "POSTING_REQUIRES_FULL_ALLOCATION",
-        "A payment cannot be posted until its complete amount is allocated.",
-        409,
-        { paymentId: payment.id, paymentAmountCents: payment.amountCents, allocatedCents },
-        correlationId,
+        "ALLOCATION_EXCEEDS_BALANCE",
+        "The payment remainder exceeds the selected record's available customer-pay balance.",
+        422,
+        { paymentId: payment.id, dmsRecordId: record.id, paymentRemainderCents: paymentRemainder, recordBalanceCents: record.balanceCents },
       );
     }
-    outbox.attemptCount += 1;
-    outbox.status = "DELIVERED";
-    outbox.deliveredAt = this.timestamp(state);
-    payment.status = "POSTED";
+
+    const allocation: Allocation = {
+      id: `alloc_${exception.id.toLowerCase().replaceAll("-", "_")}`,
+      paymentId: payment.id,
+      dmsRecordId: record.id,
+      amountCents: paymentRemainder,
+      source: "HUMAN_RESOLUTION",
+      operationKey,
+      createdAt: commandAt,
+    };
+    this.assertFreshFinancialOperation(state, allocation.id, operationKey);
+    state.allocations.push(allocation);
+    record.balanceCents -= paymentRemainder;
+    const verifiedAt = this.postToDms(state, payment, record, operationKey, "PAYMENT_POST", commandAt);
+    return { action, targetId: record.id, targetLabel: record.recordNumber, amountCents: paymentRemainder, verifiedAt };
+  }
+
+  private resolveRefund(
+    state: WorkspaceState,
+    exception: DemoException,
+    refund: Payment,
+    originalPaymentId: string,
+    operationKey: string,
+    commandAt: string,
+  ): ResolutionEffect {
+    if (refund.kind !== "REFUND") {
+      throw new DomainError("INVALID_PAYMENT_KIND", "This resolution requires a refund.", 422, {
+        exceptionId: exception.id, paymentId: refund.id, kind: refund.kind,
+      });
+    }
+    const original = this.requirePayment(state, originalPaymentId);
+    if (original.kind !== "CAPTURE" || !original.linkedRecordId) {
+      throw new DomainError("INVALID_REFUND_ORIGINAL", "Choose an original captured payment with a DMS record.", 422, {
+        refundPaymentId: refund.id, originalPaymentId,
+      });
+    }
+    const record = this.requireDmsRecord(state, original.linkedRecordId);
+    this.assertCompatibleTarget(refund, record);
+    if (original.rooftopId !== refund.rooftopId || original.department !== refund.department) {
+      throw new DomainError("INVALID_REFUND_ORIGINAL", "The original payment must belong to the same location and department.", 422, {
+        refundPaymentId: refund.id, originalPaymentId,
+      });
+    }
+    const alreadyRefunded = this.sum(
+      state.refundLinks.filter((item) => item.originalPaymentId === original.id),
+      (item) => this.requirePayment(state, item.refundPaymentId).amountCents,
+    );
+    if (refund.amountCents > original.amountCents - alreadyRefunded) {
+      throw new DomainError("REFUND_EXCEEDS_ORIGINAL", "The refund exceeds the original payment's refundable remainder.", 422, {
+        refundPaymentId: refund.id, originalPaymentId, refundableCents: original.amountCents - alreadyRefunded,
+      });
+    }
+    if (state.refundLinks.some((item) => item.refundPaymentId === refund.id)) {
+      throw new DomainError("REFUND_ALREADY_LINKED", "This refund already has an original payment.", 409, { refundPaymentId: refund.id });
+    }
+
+    const linkId = `refund_link_${refund.id.toLowerCase().replaceAll("-", "_")}`;
+    this.assertFreshFinancialOperation(state, linkId, operationKey);
+    state.refundLinks.push({
+      id: linkId,
+      refundPaymentId: refund.id,
+      originalPaymentId: original.id,
+      dmsRecordId: record.id,
+      operationKey,
+      actor: state.user.name,
+      createdAt: commandAt,
+    });
+    const verifiedAt = this.postToDms(state, refund, record, operationKey, "REFUND_LINK", commandAt, original.id);
+    return { action: "LINK_REFUND", targetId: original.id, targetLabel: record.recordNumber, amountCents: refund.amountCents, verifiedAt };
+  }
+
+  private postToDms(
+    state: WorkspaceState,
+    payment: Payment,
+    record: DmsRecord,
+    operationKey: string,
+    mutationKind: OutboxItem["mutationKind"],
+    commandAt: string,
+    originalPaymentId?: string,
+  ): string {
+    if (state.outbox.some((item) => item.operationKey === operationKey)) {
+      throw new DomainError("IDEMPOTENCY_KEY_REUSE", "The operation key already belongs to another posting.", 409, { operationKey });
+    }
+    const postedAt = this.addMilliseconds(commandAt, 1_000);
+    const verifiedAt = this.addMilliseconds(commandAt, 2_000);
+    const outbox: OutboxItem = {
+      id: `out_${payment.id.toLowerCase().replaceAll("-", "_")}`,
+      paymentId: payment.id,
+      dmsRecordId: record.id,
+      operationKey,
+      mutationKind,
+      destination: "LEGACY_DMS",
+      status: "DELIVERED",
+      attemptCount: 1,
+      createdAt: commandAt,
+      deliveredAt: verifiedAt,
+    };
+    this.invariant(!state.outbox.some((item) => item.id === outbox.id), `Outbox id ${outbox.id} was reused`);
+    state.outbox.push(outbox);
+    state.invariants.outboxCreated += 1;
+    state.invariants.outboxDelivered += 1;
     state.invariants.dmsAttempts += 1;
     state.invariants.dmsMutations += 1;
-    state.invariants.outboxDelivered += 1;
-    this.integration(state, {
+
+    payment.linkedRecordId = record.id;
+    payment.sourceReference = record.recordNumber;
+    payment.matchedAt = commandAt;
+    payment.dmsState = "VERIFIED";
+    payment.postedAt = postedAt;
+    payment.verifiedAt = verifiedAt;
+    payment.postingOperationKey = operationKey;
+
+    this.appendIntegrationAttempt(state, {
       system: "LEGACY_DMS",
       direction: "OUTBOUND",
-      operation: "post-payment",
+      operation: mutationKind === "REFUND_LINK" ? "POST /refund-links" : "POST /cash-receipts",
       externalEventId: payment.externalEventId,
       operationKey,
-      correlationId,
+      correlationId: this.correlationId(payment.id, operationKey),
       status: "COMMITTED",
       httpStatus: 201,
-      attempt: outbox.attemptCount,
-      note: "LegacyDMS accepted one synthetic payment posting.",
-      sanitizedRequest: { repairOrderNumber: invoice.repairOrderNumber, amountCents: payment.amountCents, operationKey },
-      sanitizedResponse: { postingId: `OP-${outbox.id.slice(-4).toUpperCase()}`, committed: true },
+      attempt: 1,
+      occurredAt: postedAt,
+      note: mutationKind === "REFUND_LINK"
+        ? "The dealership system accepted one refund-to-original relationship."
+        : "The dealership system accepted one payment posting.",
+      sanitizedRequest: mutationKind === "REFUND_LINK"
+        ? { refundPaymentId: payment.id, originalPaymentId, recordNumber: record.recordNumber, amountCents: payment.amountCents, operationKey }
+        : { paymentId: payment.id, recordNumber: record.recordNumber, amountCents: payment.amountCents, operationKey },
+      sanitizedResponse: { postingId: `DMS-${payment.id}`, committed: true, verified: true },
     });
+    return verifiedAt;
   }
 
-  private acceptInboxDelivery(state: DemoState, externalEventId: string): boolean {
-    state.invariants.processorDeliveriesReceived += 1;
-    const existing = state.inbox.find((entry) => entry.provider === "northstar" && entry.externalEventId === externalEventId);
-    if (existing) {
-      existing.deliveryCount += 1;
-      state.invariants.duplicateDeliveriesIgnored += 1;
-      return false;
+  private recalculateLocationClose(state: WorkspaceState, rooftopId: string) {
+    const close = this.requireClose(state, rooftopId);
+    if (close.status === "CLOSED") return close;
+    const proof = this.computeCloseProof(state, rooftopId);
+    const changed =
+      close.paymentCount !== proof.paymentCount ||
+      close.verifiedPostingCount !== proof.verifiedPostingCount ||
+      close.blockingExceptionCount !== proof.blockingExceptionCount ||
+      close.settlementStatus !== proof.settlementStatus ||
+      close.status !== proof.status;
+    close.paymentCount = proof.paymentCount;
+    close.verifiedPostingCount = proof.verifiedPostingCount;
+    close.blockingExceptionCount = proof.blockingExceptionCount;
+    close.settlementStatus = proof.settlementStatus;
+    close.status = proof.status;
+    if (changed) close.version += 1;
+    return close;
+  }
+
+  private computeCloseProof(state: WorkspaceState, rooftopId: string): CloseProof {
+    const close = this.requireClose(state, rooftopId);
+    const payments = state.payments.filter((payment) =>
+      payment.rooftopId === rooftopId && payment.inFridayClose && payment.businessDate === close.businessDate);
+    const verifiedPostingCount = payments.filter((payment) => payment.dmsState === "VERIFIED").length;
+    const blockingExceptionCount = state.exceptions.filter((exception) =>
+      exception.rooftopId === rooftopId && exception.severity === "BLOCKING" && exception.status === "OPEN").length;
+    const currentPayout = state.payouts.find((payout) =>
+      payout.rooftopId === rooftopId && payout.payoutDate === close.businessDate);
+    const settlementStatus = currentPayout?.status ?? close.settlementStatus;
+    const status = blockingExceptionCount > 0
+      ? "BLOCKED"
+      : verifiedPostingCount === payments.length
+        ? "READY"
+        : "PROCESSING";
+    return { paymentCount: payments.length, verifiedPostingCount, blockingExceptionCount, settlementStatus, status };
+  }
+
+  private recordVersionConflict(
+    state: WorkspaceState,
+    input: {
+      scope: string;
+      idempotencyKey: string;
+      fingerprint: string;
+      entityType: string;
+      entityId: string;
+      expectedVersion: number;
+      actualVersion: number;
+      message: string;
+      extraDetails: Record<string, unknown>;
+    },
+  ): EngineOutcome {
+    const occurredAt = this.nextCommandTime(state);
+    const correlationId = this.correlationId(input.entityId, input.idempotencyKey);
+    const details: Record<string, unknown> = {
+      entityId: input.entityId,
+      expectedVersion: input.expectedVersion,
+      actualVersion: input.actualVersion,
+      ...input.extraDetails,
+    };
+    const rejection: EngineRejection = {
+      code: "VERSION_CONFLICT",
+      message: input.message,
+      status: 409,
+      correlationId,
+      details,
+    };
+    const result: Record<string, unknown> = { outcome: "REJECTED", rejection };
+    this.appendAudit(state, {
+      type: "STALE_VERSION_CONFLICT",
+      entityType: input.entityType,
+      entityId: input.entityId,
+      actor: state.user.name,
+      occurredAt,
+      correlationId,
+      summary: `Rejected a stale update to ${input.entityId}; the latest state was preserved.`,
+      details,
+    });
+    state.invariants.rejectedVersionConflicts += 1;
+    this.recordCommand(state, input.idempotencyKey, input.scope, input.fingerprint, result, occurredAt);
+    this.assertInvariants(state);
+    return { changed: true, replayed: false, result, rejected: rejection };
+  }
+
+  private replayCommand(
+    state: WorkspaceState,
+    idempotencyKey: string,
+    scope: string,
+    fingerprint: string,
+  ): EngineOutcome | null {
+    const receipt = state.commandReceipts.find((item) => item.idempotencyKey === idempotencyKey);
+    if (!receipt) return null;
+    if (receipt.scope !== scope || receipt.fingerprint !== fingerprint) {
+      throw new DomainError(
+        "IDEMPOTENCY_KEY_REUSE",
+        "That idempotency key already belongs to a different command payload.",
+        409,
+        { idempotencyKey, existingScope: receipt.scope, requestedScope: scope },
+      );
     }
-    state.inbox.push({
-      provider: "northstar",
-      externalEventId,
-      firstSeenAt: this.timestamp(state),
-      deliveryCount: 1,
-    });
-    state.invariants.uniqueProcessorEventsApplied += 1;
-    return true;
+    const rejected = this.readStoredRejection(receipt);
+    this.assertInvariants(state);
+    return rejected
+      ? { changed: false, replayed: true, result: receipt.result, rejected }
+      : { changed: false, replayed: true, result: receipt.result };
   }
 
-  private integration(state: DemoState, input: Omit<IntegrationAttempt, "id" | "occurredAt">): void {
-    state.integrationAttempts.push({
-      id: `try_${String(state.integrationAttempts.length + 1).padStart(4, "0")}`,
-      occurredAt: this.timestamp(state),
-      ...input,
-    });
-  }
-
-  private appendAudit(state: DemoState, input: Omit<AuditEvent, "id" | "sequence" | "occurredAt">): void {
-    const sequence = state.auditEvents.length + 1;
-    state.auditEvents.push({
-      id: `audit_${String(sequence).padStart(4, "0")}`,
-      sequence,
-      occurredAt: this.timestamp(state),
-      ...input,
-    });
-  }
-
-  private completeAction(
-    state: DemoState,
-    action: Exclude<DemoAction, "run-all" | "resolve-exception">,
-    chapter: number,
-  ): void {
-    state.completedActions.push(action);
-    this.setChapter(state, chapter);
-  }
-
-  private setChapter(state: DemoState, chapter: number): void {
-    state.currentChapter = chapter;
-    for (const item of state.chapters) {
-      if (item.number <= chapter) item.status = "COMPLETE";
-      else if (item.number === chapter + 1) item.status = "ACTIVE";
-      else item.status = "LOCKED";
-    }
-  }
-
-  private assertPrerequisite(
-    state: DemoState,
-    action: Exclude<DemoAction, "run-all" | "resolve-exception">,
-  ): void {
-    const ordered: Array<Exclude<DemoAction, "run-all" | "resolve-exception">> = [
-      "process-routine",
-      "deliver-duplicate",
-      "simulate-lost-response",
-      "open-ambiguous-exception",
-      "simulate-resolution-race",
-      "reconcile-settlement",
-    ];
-    const index = ordered.indexOf(action);
-    const prerequisite = index > 0 ? ordered[index - 1] : undefined;
+  private readStoredRejection(receipt: CommandReceipt): EngineRejection | null {
+    const value = receipt.result.rejection;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const rejection = value as Record<string, unknown>;
     if (
-      action === "reconcile-settlement" &&
-      state.exceptions.some((item) => item.id === "exc_ambiguous_1009" && item.status === "RESOLVED")
+      rejection.code !== "VERSION_CONFLICT" || typeof rejection.message !== "string" ||
+      rejection.status !== 409 || typeof rejection.correlationId !== "string" ||
+      !rejection.details || typeof rejection.details !== "object" || Array.isArray(rejection.details)
     ) {
-      return;
+      throw new Error(`Command receipt ${receipt.idempotencyKey} contains an invalid rejection result`);
     }
-    if (prerequisite && !state.completedActions.includes(prerequisite)) {
-      throw new DomainError("ACTION_OUT_OF_ORDER", `Complete ${prerequisite} before ${action}.`, 409, {
-        requiredAction: prerequisite,
-        requestedAction: action,
-      });
-    }
-  }
-
-  private replayResult(state: DemoState, action: DemoAction): Record<string, unknown> {
     return {
-      message: "This chapter was already applied. The original state was returned without another mutation.",
-      action,
-      sessionVersion: state.session.version,
-      allocations: state.allocations.length,
-      dmsAttempts: state.invariants.dmsAttempts,
-      dmsMutations: state.invariants.dmsMutations,
-      closeStatus: state.close.status,
+      code: "VERSION_CONFLICT",
+      message: rejection.message,
+      status: 409,
+      correlationId: rejection.correlationId,
+      details: rejection.details as Record<string, unknown>,
     };
   }
 
-  private assertCloseOperationsComplete(state: DemoState, correlationId: string): void {
-    const incompleteCaptureIds = state.payments
-      .filter((payment) => payment.kind === "CAPTURE")
-      .filter((payment) => {
-        const allocatedCents = state.allocations
-          .filter((allocation) => allocation.paymentId === payment.id)
-          .reduce((sum, allocation) => sum + allocation.amountCents, 0);
-        return allocatedCents !== payment.amountCents || payment.status !== "POSTED";
-      })
-      .map((payment) => payment.id);
-    const unaccountedRefundIds = state.payments
-      .filter((payment) => payment.kind === "REFUND" && payment.status !== "REFUNDED")
-      .map((payment) => payment.id);
-    const pendingOutboxIds = state.outbox
-      .filter((item) => item.status !== "DELIVERED")
-      .map((item) => item.id);
+  private recordCommand(
+    state: WorkspaceState,
+    idempotencyKey: string,
+    scope: string,
+    fingerprint: string,
+    result: Record<string, unknown>,
+    createdAt: string,
+  ): void {
+    this.invariant(!state.commandReceipts.some((item) => item.idempotencyKey === idempotencyKey), `Command receipt ${idempotencyKey} already exists`);
+    state.commandReceipts.push({
+      idempotencyKey,
+      scope,
+      fingerprint,
+      result: structuredClone(result),
+      createdAt,
+    });
+  }
 
-    if (incompleteCaptureIds.length > 0 || unaccountedRefundIds.length > 0 || pendingOutboxIds.length > 0) {
+  private assertFreshFinancialOperation(state: WorkspaceState, id: string, operationKey: string): void {
+    if (
+      state.allocations.some((item) => item.id === id || item.operationKey === operationKey) ||
+      state.refundLinks.some((item) => item.id === id || item.operationKey === operationKey) ||
+      state.outbox.some((item) => item.operationKey === operationKey) ||
+      state.settlementAdjustments.some((item) => item.id === id || item.operationKey === operationKey)
+    ) {
       throw new DomainError(
-        "CLOSE_INCOMPLETE",
-        "Every capture, refund, and outbound posting must be complete before settlement close.",
+        "IDEMPOTENCY_KEY_REUSE",
+        "That operation identity already belongs to another financial mutation.",
         409,
-        { incompleteCaptureIds, unaccountedRefundIds, pendingOutboxIds },
-        correlationId,
+        { operationKey },
       );
     }
   }
 
-  private requirePayment(state: DemoState, paymentId: string) {
-    const payment = state.payments.find((item) => item.id === paymentId);
-    if (!payment) throw new Error(`Payment ${paymentId} is missing from the synthetic fixture`);
-    return payment;
+  private assertExceptionIdentity(exception: DemoException, payment: Payment): void {
+    this.invariant(exception.rooftopId === payment.rooftopId, `Exception ${exception.id} crossed rooftop boundaries`);
+    this.invariant(exception.department === payment.department, `Exception ${exception.id} crossed department boundaries`);
   }
 
-  private requireInvoice(state: DemoState, invoiceId: string) {
-    const invoice = state.invoices.find((item) => item.id === invoiceId);
-    if (!invoice) throw new Error(`Invoice ${invoiceId} is missing from the synthetic fixture`);
-    return invoice;
-  }
-
-  private requireOutbox(state: DemoState, operationKey: string) {
-    const item = state.outbox.find((candidate) => candidate.operationKey === operationKey);
-    if (!item) throw new Error(`Outbox item ${operationKey} is missing from the synthetic fixture`);
-    return item;
-  }
-
-  private requireOpenException(state: DemoState): DemoException {
-    const exception = state.exceptions.find((item) => item.id === "exc_ambiguous_1009");
-    if (!exception) {
-      throw new DomainError("ACTION_OUT_OF_ORDER", "Open the ambiguous exception before simulating the race.", 409, {
-        requiredAction: "open-ambiguous-exception",
+  private assertCompatibleTarget(payment: Payment, record: DmsRecord): void {
+    if (payment.rooftopId !== record.rooftopId) {
+      throw new DomainError("CROSS_ROOFTOP_ALLOCATION", "A payment cannot be applied to another location.", 422, {
+        paymentId: payment.id, paymentRooftopId: payment.rooftopId, dmsRecordId: record.id, recordRooftopId: record.rooftopId,
       });
     }
-    if (exception.status !== "OPEN") {
-      throw new VersionConflictError({ exceptionId: exception.id, actualVersion: exception.version, winningResolution: exception.resolution });
+    if (payment.department !== record.department) {
+      throw new DomainError("CROSS_DEPARTMENT_ALLOCATION", "A payment cannot be applied across departments.", 422, {
+        paymentId: payment.id, paymentDepartment: payment.department, dmsRecordId: record.id, recordDepartment: record.department,
+      });
     }
+    if (payment.currency !== record.currency) {
+      throw new DomainError("CURRENCY_MISMATCH", "Payment and record currencies must match.", 422, { paymentId: payment.id, dmsRecordId: record.id });
+    }
+  }
+
+  private resolutionReason(exception: DemoException, targetLabel: string): string {
+    if (exception.type === "UNMATCHED_REFUND") return `Linked the refund to ${targetLabel} after reviewing the original transaction evidence.`;
+    if (exception.type === "SPLIT_ALLOCATION") return `Attached the second split-tender payment to ${targetLabel}.`;
+    return `Applied the payment to ${targetLabel} after reviewing amount, customer, location, department, and timing evidence.`;
+  }
+
+  private resolutionSummary(exception: DemoException, payment: Payment, targetLabel: string): string {
+    const amount = this.formatCents(payment.amountCents);
+    if (exception.type === "UNMATCHED_REFUND") return `Linked -${amount} refund to original Parts payment ${targetLabel}`;
+    if (exception.type === "SPLIT_ALLOCATION") return `Attached ${amount} payment to ${targetLabel}`;
+    return `Applied ${amount} payment to ${targetLabel}`;
+  }
+
+  private appendIntegrationAttempt(state: WorkspaceState, input: Omit<IntegrationAttempt, "id">): void {
+    state.integrationAttempts.push({
+      id: `try_command_${String(state.integrationAttempts.length + 1).padStart(4, "0")}`,
+      ...input,
+    });
+  }
+
+  private appendAudit(state: WorkspaceState, input: Omit<AuditEvent, "id" | "sequence">): void {
+    const sequence = state.auditEvents.length + 1;
+    state.auditEvents.push({ id: `audit_${String(sequence).padStart(4, "0")}`, sequence, ...input });
+  }
+
+  private nextCommandTime(state: WorkspaceState): string {
+    const commandIndex = Math.max(0, state.auditEvents.length - 3);
+    const scheduled = COMMAND_TIMES[commandIndex];
+    if (scheduled) return scheduled;
+    const last = COMMAND_TIMES.at(-1)!;
+    return this.addMilliseconds(last, (commandIndex - COMMAND_TIMES.length + 1) * 180_000);
+  }
+
+  private addMilliseconds(iso: string, milliseconds: number): string {
+    return new Date(new Date(iso).getTime() + milliseconds).toISOString();
+  }
+
+  private operationKey(prefix: string, entityId: string, idempotencyKey: string): string {
+    return `${prefix}_${entityId.toLowerCase().replaceAll("-", "_")}_${this.digest(idempotencyKey).slice(0, 16)}`;
+  }
+
+  private correlationId(entityId: string, identity: string): string {
+    return `corr_${entityId.toLowerCase().replaceAll("-", "_")}_${this.digest(identity).slice(0, 12)}`;
+  }
+
+  private fingerprint(scope: string, payload: Record<string, unknown>): string {
+    return this.digest(JSON.stringify({ scope, ...payload }));
+  }
+
+  private digest(value: string): string {
+    return createHash("sha256").update(value).digest("hex");
+  }
+
+  private formatCents(cents: number): string {
+    return `$${(cents / 100).toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  private requireException(state: WorkspaceState, exceptionId: string): DemoException {
+    const exception = state.exceptions.find((item) => item.id === exceptionId);
+    if (!exception) throw new DomainError("EXCEPTION_NOT_FOUND", "That exception does not exist in this workspace.", 404, { exceptionId });
     return exception;
   }
 
-  private updateCheck(state: DemoState, id: string, status: "PASS" | "PENDING", value: string): void {
-    const check = state.evidence.checks.find((item) => item.id === id);
-    if (!check) throw new Error(`Evidence check ${id} is missing`);
-    check.status = status;
-    check.value = value;
+  private requirePayment(state: WorkspaceState, paymentId: string): Payment {
+    const payment = state.payments.find((item) => item.id === paymentId);
+    if (!payment) throw new Error(`Payment ${paymentId} is missing from the workspace`);
+    return payment;
   }
 
-  private correlation(state: DemoState, suffix: string): string {
-    return `corr_${state.session.id.slice(0, 8)}_${suffix}`;
+  private requireDmsRecord(state: WorkspaceState, recordId: string): DmsRecord {
+    const record = state.dmsRecords.find((item) => item.id === recordId);
+    if (!record) throw new DomainError("DMS_RECORD_NOT_FOUND", "That dealership record does not exist.", 404, { recordId });
+    return record;
   }
 
-  private timestamp(state: DemoState): string {
-    const base = new Date(state.session.resetAt).getTime();
-    const offset = state.auditEvents.length * 1_000 + state.integrationAttempts.length * 100 + state.allocations.length * 10;
-    return new Date(base + offset).toISOString();
+  private requireClose(state: WorkspaceState, rooftopId: string) {
+    const close = state.operationalCloses.find((item) =>
+      item.rooftopId === rooftopId && item.businessDate === WORKSPACE_BUSINESS_DATE);
+    if (!close) throw new DomainError("LOCATION_CLOSE_NOT_FOUND", "That location is not part of this close.", 404, { rooftopId });
+    return close;
   }
 
-  private assertInvariants(state: DemoState): void {
-    const cents = [
-      state.totals.grossCents,
-      state.totals.feeCents,
-      state.totals.refundCents,
-      state.totals.expectedDepositCents,
-      state.totals.bankDepositCents,
-      state.totals.varianceCents,
-      ...state.payments.map((payment) => payment.amountCents),
-      ...state.invoices.flatMap((invoice) => [invoice.amountCents, invoice.balanceCents]),
-      ...state.allocations.map((allocation) => allocation.amountCents),
-    ];
-    if (!cents.every(Number.isInteger)) throw new Error("Financial invariant failed: all money must use integer cents");
+  private requirePayout(state: WorkspaceState, payoutId: string): ProcessorPayout {
+    const payout = state.payouts.find((item) => item.id === payoutId);
+    if (!payout) throw new DomainError("PAYOUT_NOT_FOUND", "That payout does not exist.", 404, { payoutId });
+    return payout;
+  }
 
-    const currency = state.totals.currency;
-    if (
-      state.settlementEvidence.processorFee.currency !== currency ||
-      state.settlementEvidence.bankDeposit.currency !== currency ||
-      state.payments.some((payment) => payment.currency !== currency) ||
-      state.invoices.some((invoice) => invoice.currency !== currency)
-    ) {
-      throw new Error("Financial invariant failed: every component must use the close currency");
-    }
-    const grossCents = state.payments
-      .filter((payment) => payment.kind === "CAPTURE")
-      .reduce((sum, payment) => sum + payment.amountCents, 0);
-    const refundCents = state.payments
-      .filter((payment) => payment.kind === "REFUND")
-      .reduce((sum, payment) => sum + payment.amountCents, 0);
-    const feeCents = state.settlementEvidence.processorFee.amountCents;
-    const expectedDepositCents = grossCents - feeCents - refundCents;
-    if (
-      state.totals.grossCents !== grossCents ||
-      state.totals.refundCents !== refundCents ||
-      state.totals.feeCents !== feeCents ||
-      state.totals.expectedDepositCents !== expectedDepositCents
-    ) {
-      throw new Error("Settlement invariant failed: source components do not match the derived totals");
-    }
-    if (state.totals.varianceCents !== expectedDepositCents - state.totals.bankDepositCents) {
-      throw new Error("Settlement invariant failed: variance must equal expected deposit minus bank deposit");
-    }
+  private requireRooftop(state: WorkspaceState, rooftopId: string) {
+    const rooftop = state.rooftops.find((item) => item.id === rooftopId);
+    if (!rooftop) throw new DomainError("ROOFTOP_NOT_FOUND", "That location does not exist.", 404, { rooftopId });
+    return rooftop;
+  }
 
-    for (const payment of state.payments) {
-      const allocated = state.allocations
-        .filter((allocation) => allocation.paymentId === payment.id)
-        .reduce((sum, allocation) => sum + allocation.amountCents, 0);
-      if (allocated > payment.amountCents) throw new Error(`Payment over-allocation invariant failed for ${payment.id}`);
-      if (payment.kind === "CAPTURE" && payment.status === "POSTED" && allocated !== payment.amountCents) {
-        throw new Error(`Posted payment completeness invariant failed for ${payment.id}`);
-      }
-    }
-    for (const invoice of state.invoices) {
-      const allocated = state.allocations
-        .filter((allocation) => allocation.invoiceId === invoice.id)
-        .reduce((sum, allocation) => sum + allocation.amountCents, 0);
-      if (allocated > invoice.amountCents || invoice.balanceCents !== invoice.amountCents - allocated) {
-        throw new Error(`Invoice balance invariant failed for ${invoice.id}`);
-      }
-    }
-    const allocationKeys = new Set(state.allocations.map((allocation) => allocation.operationKey));
-    const outboxKeys = new Set(state.outbox.map((item) => item.operationKey));
-    if (allocationKeys.size !== state.allocations.length) throw new Error("Allocation operation keys must be unique");
-    if (outboxKeys.size !== state.outbox.length) throw new Error("Outbox operation keys must be unique");
+  private assertUnique(values: string[], label: string): void {
+    this.invariant(new Set(values).size === values.length, `${label} must be unique`);
+  }
 
-    for (const allocation of state.allocations) {
-      const matchingOutbox = state.outbox.filter((item) => item.operationKey === allocation.operationKey);
-      if (
-        matchingOutbox.length !== 1 ||
-        matchingOutbox[0]?.paymentId !== allocation.paymentId ||
-        matchingOutbox[0]?.invoiceId !== allocation.invoiceId
-      ) {
-        throw new Error(`Allocation/outbox identity invariant failed for ${allocation.operationKey}`);
-      }
-    }
-    for (const outbox of state.outbox.filter((item) => item.status === "DELIVERED")) {
-      const committed = state.integrationAttempts.filter((attempt) =>
-        attempt.system === "LEGACY_DMS" &&
-        attempt.operationKey === outbox.operationKey &&
-        (
-          attempt.status === "COMMITTED" ||
-          (attempt.status === "RESPONSE_LOST" && attempt.sanitizedResponse?.committed === true)
-        ));
-      if (committed.length !== 1) {
-        throw new Error(`Delivered outbox must have exactly one destination mutation for ${outbox.operationKey}`);
-      }
-    }
-    for (const exception of state.exceptions.filter((item) => item.status === "RESOLVED")) {
-      const resolution = exception.resolution;
-      if (!resolution) throw new Error(`Resolved exception ${exception.id} has no resolution`);
-      const payment = this.requirePayment(state, exception.paymentId);
-      const matchingAllocations = state.allocations.filter((allocation) =>
-        allocation.paymentId === exception.paymentId && allocation.operationKey === resolution.operationKey);
-      const allocation = matchingAllocations[0];
-      const outbox = state.outbox.find((item) => item.operationKey === resolution.operationKey);
-      if (
-        matchingAllocations.length !== 1 ||
-        !allocation ||
-        allocation.source !== "HUMAN_RESOLUTION" ||
-        allocation.invoiceId !== resolution.candidateInvoiceId ||
-        allocation.amountCents !== resolution.acceptedAmountCents ||
-        allocation.amountCents !== payment.amountCents ||
-        payment.status !== "POSTED" ||
-        !outbox ||
-        outbox.paymentId !== payment.id ||
-        outbox.invoiceId !== allocation.invoiceId ||
-        outbox.status !== "DELIVERED"
-      ) {
-        throw new Error(`Resolved exception evidence invariant failed for ${exception.id}`);
-      }
-    }
+  private sum<T>(items: T[], select: (item: T) => number): number {
+    return items.reduce((total, item) => total + select(item), 0);
+  }
 
-    const openBlocking = state.exceptions.filter((item) => item.severity === "BLOCKING" && item.status === "OPEN").length;
-    if (state.close.blockingExceptionCount !== openBlocking) {
-      throw new Error("Close blocker count must equal the open blocking exception count");
-    }
-    if (state.invariants.uniqueProcessorEventsApplied !== state.inbox.length) {
-      throw new Error("Inbox invariant failed: applied event count does not match unique receipts");
-    }
-    const receivedDeliveries = state.inbox.reduce((sum, receipt) => sum + receipt.deliveryCount, 0);
-    const duplicateDeliveries = state.inbox.reduce((sum, receipt) => sum + receipt.deliveryCount - 1, 0);
-    if (
-      state.invariants.processorDeliveriesReceived !== receivedDeliveries ||
-      state.invariants.duplicateDeliveriesIgnored !== duplicateDeliveries
-    ) {
-      throw new Error("Inbox invariant failed: delivery counters do not match durable receipts");
-    }
-    const dmsAttempts = state.integrationAttempts.filter((attempt) => attempt.system === "LEGACY_DMS").length;
-    const dmsMutations = state.integrationAttempts.filter((attempt) =>
-      attempt.system === "LEGACY_DMS" &&
-      (
-        attempt.status === "COMMITTED" ||
-        (attempt.status === "RESPONSE_LOST" && attempt.sanitizedResponse?.committed === true)
-      )).length;
-    if (state.invariants.dmsAttempts !== dmsAttempts || state.invariants.dmsMutations !== dmsMutations) {
-      throw new Error("DMS invariant failed: attempt and mutation counters do not match evidence");
-    }
-    const deliveredOutbox = state.outbox.filter((item) => item.status === "DELIVERED").length;
-    if (
-      state.invariants.outboxCreated !== state.outbox.length ||
-      state.invariants.outboxDelivered !== deliveredOutbox
-    ) {
-      throw new Error("Outbox invariant failed: counters do not match persisted intent");
-    }
-
-    if (state.completedActions.includes("reconcile-settlement") &&
-      state.totals.bankDepositCents !== state.settlementEvidence.bankDeposit.amountCents) {
-      throw new Error("Settlement invariant failed: evaluated deposit must come from the independent bank record");
-    }
-    if (state.close.status === "READY") {
-      if (!state.completedActions.includes("reconcile-settlement")) {
-        throw new Error("Close cannot be ready before settlement evaluation");
-      }
-      if (openBlocking !== 0 || state.outbox.some((item) => item.status !== "DELIVERED")) {
-        throw new Error("Close cannot be ready with blocking work or pending outbox intent");
-      }
-      const incompleteCapture = state.payments.some((payment) => {
-        if (payment.kind !== "CAPTURE") return false;
-        const allocated = state.allocations
-          .filter((allocation) => allocation.paymentId === payment.id)
-          .reduce((sum, allocation) => sum + allocation.amountCents, 0);
-        return payment.status !== "POSTED" || allocated !== payment.amountCents;
-      });
-      const unaccountedRefund = state.payments.some((payment) => payment.kind === "REFUND" && payment.status !== "REFUNDED");
-      if (incompleteCapture || unaccountedRefund || state.totals.varianceCents !== 0) {
-        throw new Error("Close cannot be ready until every financial component is complete and reconciled");
-      }
-    }
+  private invariant(condition: boolean, message: string): asserts condition {
+    if (!condition) throw new Error(`Workspace invariant failed: ${message}`);
   }
 }

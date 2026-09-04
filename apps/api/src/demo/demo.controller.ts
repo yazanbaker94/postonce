@@ -1,18 +1,19 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, Req } from "@nestjs/common";
 import type { Request } from "express";
 import { createHash } from "node:crypto";
 import { isIP, SocketAddress } from "node:net";
 import {
-  ActionRequestSchema,
+  CloseLocationRequestSchema,
   DEMO_SESSION_HEADER,
-  DemoActionSchema,
-  type ActionRequest,
-  type ActionResponse,
-  type DemoAction,
+  ResolveExceptionRequestSchema,
+  SettlementAdjustmentRequestSchema,
+  type CloseLocationRequest,
   type DemoState,
+  type MutationResponse,
+  type ResolveExceptionRequest,
   type SessionResponse,
+  type SettlementAdjustmentRequest,
 } from "@postonce/contracts";
-import { DomainError } from "../common/domain-error.js";
 import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
 import { DemoService } from "./demo.service.js";
 
@@ -22,32 +23,20 @@ const CLIENT_KEY_DOMAIN = "postonce-demo-create-limit-v1";
 const UNATTRIBUTED_CLIENT_IDENTITY = "unattributed-private-proxy-client";
 
 function canonicalIp(value: string | undefined): string | null {
-  if (!value || value !== value.trim() || value.length > 64) {
-    return null;
-  }
-
+  if (!value || value !== value.trim() || value.length > 64) return null;
   const ipVersion = isIP(value);
-  if (ipVersion === 0) {
-    return null;
-  }
-
+  if (ipVersion === 0) return null;
   try {
-    const canonical = new SocketAddress({
-      address: value,
-      family: ipVersion === 4 ? "ipv4" : "ipv6",
-    }).address;
-    const mappedIpv4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(canonical);
-    return mappedIpv4?.[1] ?? canonical;
+    const canonical = new SocketAddress({ address: value, family: ipVersion === 4 ? "ipv4" : "ipv6" }).address;
+    return /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(canonical)?.[1] ?? canonical;
   } catch {
     return null;
   }
 }
 
 /**
- * The immediate private proxy overwrites this internal header after deriving the
- * address from its trusted-hop configuration. Public forwarding headers are
- * intentionally ignored. Missing or malformed identities share one conservative
- * limiter bucket instead of trusting a caller-controlled fallback.
+ * The trusted ingress overwrites this internal header from its peer chain. Public
+ * forwarding headers remain intentionally ignored.
  */
 export function createSessionClientKey(request: Pick<Request, "header" | "socket">): string {
   const identity = canonicalIp(request.header(TRUSTED_CLIENT_IP_HEADER))
@@ -69,62 +58,148 @@ export class DemoController {
     return this.demo.createSession(createSessionClientKey(request));
   }
 
-  @Get("demo/state")
-  async state(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<DemoState> {
-    return this.demo.state(sessionId);
-  }
-
   @Post("demo/reset")
   @HttpCode(200)
   async reset(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<SessionResponse> {
     return this.demo.resetSession(sessionId);
   }
 
-  @Post("demo/actions/:action")
-  @HttpCode(200)
-  async action(
-    @Headers(DEMO_SESSION_HEADER) sessionId: string,
-    @Param("action") actionInput: string,
-    @Body(new ZodValidationPipe(ActionRequestSchema)) request: ActionRequest,
-  ): Promise<ActionResponse> {
-    const parsed = DemoActionSchema.safeParse(actionInput);
-    if (!parsed.success) {
-      throw new DomainError("UNKNOWN_ACTION", "That guided-demo action is not supported.", 404, {
-        requestedAction: actionInput,
-        supportedActions: DemoActionSchema.options,
-      });
-    }
-    return this.demo.execute(sessionId, parsed.data as DemoAction, request);
+  @Get("demo/state")
+  async legacyState(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<DemoState> {
+    return this.demo.state(sessionId);
+  }
+
+  @Get("workspace")
+  async workspace(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<DemoState> {
+    return this.demo.state(sessionId);
   }
 
   @Get("overview")
   async overview(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<Record<string, unknown>> {
-    return this.demo.overview(sessionId);
+    return this.demo.closeOverview(sessionId);
   }
 
-  @Get("payments")
-  async payments(@Headers(DEMO_SESSION_HEADER) sessionId: string) {
-    return this.demo.list(sessionId, "payments");
+  @Get("close")
+  async closeOverview(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<Record<string, unknown>> {
+    return this.demo.closeOverview(sessionId);
   }
 
-  @Get("invoices")
-  async invoices(@Headers(DEMO_SESSION_HEADER) sessionId: string) {
-    return this.demo.list(sessionId, "invoices");
+  @Get("close/:rooftopId")
+  async closeDetail(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Param("rooftopId") rooftopId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.demo.closeDetail(sessionId, rooftopId);
+  }
+
+  @Post("close/:rooftopId/close")
+  @HttpCode(200)
+  async closeLocation(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Param("rooftopId") rooftopId: string,
+    @Body(new ZodValidationPipe(CloseLocationRequestSchema)) request: CloseLocationRequest,
+  ): Promise<MutationResponse> {
+    return this.demo.closeLocation(sessionId, rooftopId, request);
   }
 
   @Get("exceptions")
-  async exceptions(@Headers(DEMO_SESSION_HEADER) sessionId: string) {
-    return this.demo.list(sessionId, "exceptions");
+  async exceptions(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Query("location") location?: string,
+    @Query("status") status?: string,
+    @Query("sort") sort?: string,
+    @Query("q") q?: string,
+  ): Promise<Record<string, unknown>> {
+    return this.demo.listExceptions(sessionId, { location, status, sort, q });
+  }
+
+  @Get("exceptions/:exceptionId")
+  async exceptionDetail(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Param("exceptionId") exceptionId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.demo.exceptionDetail(sessionId, exceptionId);
+  }
+
+  @Post("exceptions/:exceptionId/resolve")
+  @HttpCode(200)
+  async resolveException(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Param("exceptionId") exceptionId: string,
+    @Body(new ZodValidationPipe(ResolveExceptionRequestSchema)) request: ResolveExceptionRequest,
+  ): Promise<MutationResponse> {
+    return this.demo.resolveException(sessionId, exceptionId, request);
+  }
+
+  @Get("payments")
+  async payments(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Query("location") location?: string,
+    @Query("department") department?: string,
+    @Query("dmsState") dmsState?: string,
+    @Query("q") q?: string,
+  ): Promise<Record<string, unknown>> {
+    return this.demo.listPayments(sessionId, { location, department, dmsState, q });
+  }
+
+  @Get("payments/:paymentId")
+  async paymentDetail(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Param("paymentId") paymentId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.demo.paymentDetail(sessionId, paymentId);
+  }
+
+  @Get("deposits")
+  async deposits(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<Record<string, unknown>> {
+    return this.demo.listDeposits(sessionId);
+  }
+
+  @Get("deposits/:payoutId")
+  async depositDetail(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Param("payoutId") payoutId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.demo.depositDetail(sessionId, payoutId);
+  }
+
+  @Post("deposits/:payoutId/adjustments")
+  @HttpCode(200)
+  async recordAdjustment(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Param("payoutId") payoutId: string,
+    @Body(new ZodValidationPipe(SettlementAdjustmentRequestSchema)) request: SettlementAdjustmentRequest,
+  ): Promise<MutationResponse> {
+    return this.demo.recordAdjustment(sessionId, payoutId, request);
+  }
+
+  @Get("activity")
+  async activity(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<Record<string, unknown>> {
+    return this.demo.activity(sessionId);
+  }
+
+  @Get("integrations")
+  async integrations(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<Record<string, unknown>> {
+    return this.demo.integrations(sessionId);
   }
 
   @Get("integration-attempts")
-  async integrationAttempts(@Headers(DEMO_SESSION_HEADER) sessionId: string) {
-    return this.demo.list(sessionId, "integrationAttempts");
+  async integrationAttempts(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<Record<string, unknown>> {
+    const integrations = await this.demo.integrations(sessionId);
+    return integrations;
   }
 
   @Get("audit-events")
-  async auditEvents(@Headers(DEMO_SESSION_HEADER) sessionId: string) {
-    return this.demo.list(sessionId, "auditEvents");
+  async auditEvents(@Headers(DEMO_SESSION_HEADER) sessionId: string): Promise<Record<string, unknown>> {
+    return this.demo.activity(sessionId);
+  }
+
+  @Get("search")
+  async search(
+    @Headers(DEMO_SESSION_HEADER) sessionId: string,
+    @Query("q") query = "",
+  ): Promise<Record<string, unknown>> {
+    return this.demo.search(sessionId, query);
   }
 
   @Get("architecture/evidence")
