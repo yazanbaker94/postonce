@@ -2,40 +2,61 @@
 
 [![CI](https://github.com/yazanbaker94/postonce/actions/workflows/ci.yml/badge.svg)](https://github.com/yazanbaker94/postonce/actions/workflows/ci.yml)
 
-[Live demo](https://postonce.swoop.video) · [Reviewer guide](docs/REVIEWER_GUIDE.md) · [Screenshot tour](docs/SCREENSHOTS.md) · [Architecture](docs/ARCHITECTURE.md)
+[Try PostOnce](https://postonce.swoop.video) · [All 24 screenshots](docs/SCREENSHOTS.md) · [Explore the code](docs/REVIEWER_GUIDE.md) · [Architecture](docs/ARCHITECTURE.md)
 
 **Account for every payment. Resolve the uncertain ones. Close every location with proof.**
 
-PostOnce is an exception-first daily-close workspace for dealership controllers. It combines processor events, dealership-system posting status, operational exceptions, and later bank-deposit reconciliation without pretending those are one workflow. Routine payments stay out of the operator's way; uncertain postings become explicit work with evidence, version checks, and an audit trail.
+PostOnce helps a dealership accounting team answer three questions: **Was every payment recorded correctly? What still needs a decision? Did the expected money reach the bank?**
+
+It brings payment records, dealership-system postings, exceptions, and bank-deposit reconciliation into one workspace. The normal path stays quiet; uncertain items come with evidence and a specific next action. Every accepted decision leaves a traceable record.
+
+Built end to end with **TypeScript, React, Vite, NestJS, Zod, and PostgreSQL**, with automated browser tests and a containerized deployment.
 
 This repository contains a synthetic evaluation product, not a payment processor. It does not authorize, capture, hold, or move money and is not affiliated with Anchorbase or any dealership, DMS, processor, or bank. All business data and external-system identities are fictional. No real customer, cardholder, vehicle, bank, or financial-system credential data is used.
 
-![PostOnce daily-close workspace: Toyota and Subaru ready, Ford blocked by three exceptions](docs/screenshots/review/01-close.png)
+## The problem
 
-## Reviewing this project?
+A customer payment, its entry in the dealership management system (DMS), and the eventual bank deposit are different records on different timelines. A missing repair-order reference, an unlinked refund, or a split payment can leave the accounting team uncertain about whether the day's work is complete.
 
-Start with the [live demo](https://postonce.swoop.video): no signup or installation is required. Open Ford's three exceptions, resolve them, return to Close, and reconcile Subaru's prior-day deposit. The [reviewer guide](docs/REVIEWER_GUIDE.md) connects that journey to the implementation and tests; the [24-image screenshot tour](docs/SCREENSHOTS.md) covers every main screen, the three decision types, evidence, completion states, and mobile layouts.
+PostOnce separates **operational close** from **bank settlement**. The team can finish today's verified posting work without falsely claiming that a pending payout has arrived. When a deposit differs from expectations, a supported adjustment explains the difference without overwriting the original facts.
 
-**Stack:** TypeScript · React · Vite · NestJS · Zod · PostgreSQL · Playwright/Vitest · Docker/Caddy · GitHub Actions.
+## Product screens
 
-**Implemented:** API-backed decisions, PostgreSQL persistence in the deployment, shared runtime validation, stale-version rejection, idempotent command replay, and append-only business evidence.
+All six main sections are previewed below. Click a screenshot to open the full-size image. The [complete 24-image tour](docs/SCREENSHOTS.md) also includes each exception decision, expanded payment evidence, settlement workpapers, completed states, search, and mobile layouts.
 
-**Deliberately simulated:** external processor/DMS/bank connections, incoming events, recovery scenarios, and the controller identity. There is no live payment processing, production authentication, autonomous AI decision-maker, or independent background outbox worker. See [production boundaries](docs/SECURITY.md).
+| Daily close | Exceptions |
+| --- | --- |
+| [![Daily close across three locations](docs/screenshots/review/01-close.png)](docs/screenshots/review/01-close.png) | [![Ford's three blocking exceptions](docs/screenshots/review/02-exceptions.png)](docs/screenshots/review/02-exceptions.png) |
+| **Payments** | **Deposits** |
+| [![Payment ledger](docs/screenshots/review/06-payments.png)](docs/screenshots/review/06-payments.png) | [![Deposit ledger](docs/screenshots/review/10-deposits.png)](docs/screenshots/review/10-deposits.png) |
+| **Activity** | **Integrations** |
+| [![Human and system activity](docs/screenshots/review/20-activity.png)](docs/screenshots/review/20-activity.png) | [![Connected simulators and recent attempts](docs/screenshots/review/14-integrations.png)](docs/screenshots/review/14-integrations.png) |
 
-## Open the product
+### Inside a decision
 
-- Product: [postonce.swoop.video](https://postonce.swoop.video)
-- Architecture: [postonce.swoop.video/architecture](https://postonce.swoop.video/architecture)
+Compare the evidence, select the correct repair order, and verify the posting before the exception clears.
 
-The root URL opens the product workspace and resolves to `/app/close`. `/demo` remains only as a compatibility redirect.
+[![Ambiguous payment match decision](docs/screenshots/review/03-payment-match.png)](docs/screenshots/review/03-payment-match.png)
 
-The browser creates an isolated synthetic workspace and keeps its identifier in local storage. A workspace-service failure leaves financial actions unavailable and visibly reports the problem; browser-only state is never presented as persisted evidence.
+### Payment evidence and settlement reconciliation
 
-To replay the demo, open **Maya Chen's profile → Reset workspace**. This resets only your browser's synthetic workspace. Demo time is intentionally fixed; the displayed controller is a fictional persona, not a signed-in identity.
+Technical detail stays attached to the business record it explains. On the left, the same posting identity recovers a lost response without a second effect. On the right, source evidence supports the $25 payout adjustment.
 
-## Canonical operator journey
+| Verified posting recovery | Evidence-backed deposit adjustment |
+| --- | --- |
+| [![Lost-response recovery with one financial effect](docs/screenshots/review/08-payment-recovery.png)](docs/screenshots/review/08-payment-recovery.png) | [![Subaru deposit variance and supporting evidence](docs/screenshots/review/11-deposit-variance.png)](docs/screenshots/review/11-deposit-variance.png) |
 
-The stable fixture is Friday, September 4, 2026 at 4:55 PM Mountain Time. Maya Chen, Group Controller for the fictional Northline Motor Group, sees 62 Friday payments across Toyota, Ford, and Subaru.
+### Responsive by design
+
+The same workflows remain available on a phone. Payment rows become labeled records, and candidate comparisons fit the available width.
+
+| Mobile close | Mobile payments | Mobile comparison |
+| --- | --- | --- |
+| [![Mobile close board](docs/screenshots/review/22-mobile-close.png)](docs/screenshots/review/22-mobile-close.png) | [![Mobile payment records](docs/screenshots/review/23-mobile-payments.png)](docs/screenshots/review/23-mobile-payments.png) | [![Mobile repair-order comparison](docs/screenshots/review/24-mobile-decision.png)](docs/screenshots/review/24-mobile-decision.png) |
+
+## Try the complete workflow
+
+Open the [live demo](https://postonce.swoop.video): no signup or installation is required. You act as Maya Chen, controller for the fictional Northline Motor Group, reviewing 62 Friday payments across Toyota, Ford, and Subaru. All fixture amounts are CAD.
 
 1. Open **Close**. Toyota and Subaru are `READY`; Ford is `BLOCKED` by three operational exceptions. Current-day processor payouts are still pending, which is normal and does not block operational close.
 2. Open Ford's exception queue, sorted newest first. Resolve `EX-104` by matching the $1,125.00 payment to `RO-8004`.
@@ -46,6 +67,8 @@ The stable fixture is Friday, September 4, 2026 at 4:55 PM Mountain Time. Maya C
 7. Open Subaru's prior-day payout. Record the source-supported −$25.00 network-assessment adjustment. The original expected amount remains $18,742.61, adjusted expected and observed deposit both become $18,717.61, and the payout becomes `RECONCILED`.
 
 The sequence is intentionally **Close → Exceptions → Close → Deposits**. Settlement evidence is monitored beside daily close, not wired in as a false prerequisite.
+
+To start again, use **Maya Chen's profile → Reset workspace**. Your browser has its own anonymous synthetic workspace; resetting it does not reset another visitor's work. The demo opens on September 4, 2026 at 4:55 PM Mountain Time, and the displayed controller is a fictional persona, not an authenticated user.
 
 ## Workspace map
 
@@ -60,7 +83,30 @@ The sequence is intentionally **Close → Exceptions → Close → Deposits**. S
 
 Global search finds payments, dealership records, exceptions, and payouts without changing financial state.
 
-## Safety model
+## Engineering approach
+
+### Architecture
+
+```mermaid
+flowchart LR
+    UI[React operator workspace] <-->|Validated REST contracts| API[NestJS command boundary]
+    API <-->|Transactions and version checks| DB[(PostgreSQL)]
+    Processor[Processor simulator] -->|Payment and refund events| API
+    API <-->|Posting and verification| DMS[DMS simulator]
+    Bank[Bank-feed simulator] -->|Deposit observations| API
+```
+
+The browser displays state returned by the API rather than treating a button click as a successful financial operation. Shared Zod schemas validate the boundary. PostgreSQL persists workspace state and normalized business evidence transactionally. External connections are deterministic simulators, making the demonstrated failure cases reproducible without proprietary access.
+
+| Layer | Technology | Responsibility |
+| --- | --- | --- |
+| Interface | React, TypeScript, Vite | Responsive workflows, evidence review, search, and explicit confirmations. |
+| API | NestJS, Zod | Business commands, validation, safe error responses, and state projections. |
+| Persistence | PostgreSQL, SQL migrations | Transactions, constraints, concurrency control, and retained evidence. |
+| Verification | Vitest, API tests, Playwright | Domain rules, invalid commands, replay, persistence, and browser journeys. |
+| Delivery | GitHub Actions, Docker, Caddy, Cloudflare | Verified image builds, digest-pinned deployment, and public routing. |
+
+### Correctness rules
 
 - Money is stored as integer minor units with an explicit currency.
 - At-least-once transport is expected; stable event and operation identities make financial mutations idempotent.
@@ -72,6 +118,23 @@ Global search finds payments, dealership records, exceptions, and payouts withou
 - Payout reconciliation has its own lifecycle; a pending payout or prior-day variance does not block today's operational close.
 
 Duplicate delivery and a lost DMS response are represented as already-handled system behavior in the fixture. Their sanitized evidence is available from the relevant Payment, Activity, and Integrations views; they are not operator-facing simulation buttons.
+
+### Deliberate tradeoffs
+
+- **Explicit commands instead of arbitrary updates:** resolve an exception, close a location, and record a supported adjustment each have a narrow validation boundary.
+- **PostgreSQL before more infrastructure:** one transactional boundary keeps the demo inspectable. The outbox is modeled, but an independent worker is not claimed.
+- **Deterministic evidence before AI:** the fixture exposes bounded candidates and the reasons behind them. No model has authority to choose a financial target or move money.
+- **Versions plus serialized writes:** a stale operator receives a conflict rather than silently overwriting the accepted decision.
+
+The [architecture notes](docs/ARCHITECTURE.md), [decision record](docs/DECISIONS.md), and [code reading map](docs/REVIEWER_GUIDE.md#suggested-code-reading-order) explain these choices in more depth.
+
+## What is implemented—and what is not
+
+**Working application:** API-backed decisions, PostgreSQL persistence in the deployment, runtime-validated contracts, command replay, stale-version rejection, audit records, source-preserving settlement adjustments, and the end-to-end operator workflow.
+
+**Simulated environment:** the customers, controller identity, processor/DMS/bank connections, incoming events, candidate sets, and recovery scenarios. The demo is not a measured production matching engine or a live Anchorbase integration.
+
+**Production work remains:** authentication and tenant authorization, actual integration contracts and signed webhooks, independently leased background execution, operational monitoring, security review, and applicable compliance controls. Anonymous workspace isolation is not authentication, and no production-readiness or compliance certification is claimed. See [security boundaries](docs/SECURITY.md).
 
 ## Repository map
 
@@ -121,27 +184,38 @@ npm run migrate --workspace @postonce/api
 npm run dev:api
 ```
 
-## Test
+## Verification
+
+The suite covers successful decisions and rejected ones: invalid allocations, reused operation keys with changed payloads, stale concurrent commands, workspace isolation, and preserved settlement arithmetic. Browser tests exercise the complete close/reconciliation journey plus desktop and mobile layouts.
+
+The reviewer release passed **21 browser tests**, alongside API/domain and component tests. GitHub CI also provisions PostgreSQL to exercise the persistence path; local runs without a test database skip that database-specific check. The badge above links to the current CI result.
 
 ```bash
 npm run check
 ```
 
-`check` runs workspace type checks, unit/API tests, and production builds. With `POSTONCE_TEST_DATABASE_URL` set, the API suite also exercises PostgreSQL locking and persistence. The full CI-equivalent gate installs Chromium and runs:
+`check` runs workspace type checks, unit/API tests, and production builds. With `POSTONCE_TEST_DATABASE_URL` set, the API suite also exercises PostgreSQL locking and persistence. For the browser suite, install Chromium once and run:
 
 ```bash
+npx playwright install chromium
 npm run verify
 ```
 
 `verify` adds the Playwright product journey and responsive-layout checks. See [Test strategy](docs/TEST_STRATEGY.md) for focused commands and expected coverage.
 
-## Deploy safely
+To reproduce the README/gallery images with the local API and web app running:
 
-Production images are built by GitHub Actions for `linux/amd64`, published to GHCR, and deployed by immutable digest. The shared VPS never builds application images. The operator artifact verifies its source commit and checksum, runs a read-only capacity/ownership preflight, and limits every change to `/opt/postonce`, Compose project `postonce`, loopback port `18044`, and one marked Caddy site file.
+```bash
+npm run screenshots:review
+```
 
-The release flow refuses to proceed unless all three protected AudioFetcher units are active, `/opt` has at least 12 GiB free, the host has at least 2 GiB total and 768 MiB currently available RAM, recent memory pressure is below the configured gate, and no OOM event or server-side application build is active. It also refuses ownership mismatches. It retains only the active and immediately previous PostOnce releases, prunes only unreferenced PostOnce images, and caps database backups by age and count. It never performs a global Docker prune. Rollback changes application images but does not reverse migrations.
+These captures use actual UI interactions in a fresh synthetic workspace, not mocked page states.
 
-Use the exact operator procedure in [infra/README.md](infra/README.md). Do not copy a working tree to the VPS or run `docker build` there.
+## Deployment
+
+GitHub Actions verifies the repository before publishing application images. The deployment uses immutable image digests, a private database network, health checks, and a bounded rollback history. Images are built off-server; deployment checks resource capacity and limits changes to the application's own boundary.
+
+The [operations guide](infra/README.md) contains the detailed release, capacity, backup, and rollback procedures.
 
 ## Read further
 
