@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PostOnce">
-  <path d="M32 5 55 18.5 32 32 9 18.5 32 5Z" fill="#1260E8" />
-  <path d="M9 18.5 32 32v27L9 45.5v-27Z" fill="#2879F2" />
-  <path d="M55 18.5 32 32v27l23-13.5v-27Z" fill="#0752C8" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 0 32 32" role="img" aria-label="PostOnce">
+  <path fill="#1260e8" d="M14 1 26 8v15L14 31 2 24V8Z" />
+  <path fill="#0b4bc0" d="m14 16 12-8v15l-12 8Z" />
+  <path fill="#2879f2" d="M2 8 14 1l12 7-12 8Z" />
+  <path fill="#1688ff" d="m2 8 12 8v15L2 24Z" />
 </svg>
