@@ -10,7 +10,23 @@ PostOnce is an exception-first daily-close workspace for dealership controllers.
 
 This repository contains a synthetic evaluation product, not a payment processor. It does not authorize, capture, hold, or move money and is not affiliated with Anchorbase or any dealership, DMS, processor, or bank. All business data and external-system identities are fictional. No real customer, cardholder, vehicle, bank, or financial-system credential data is used.
 
-![PostOnce daily-close workspace: Toyota and Subaru ready, Ford blocked by three exceptions](docs/screenshots/review/01-close.png)
+## Product screens
+
+All six main sections are previewed below. Click a screenshot to open the full-size image. The [complete 24-image tour](docs/SCREENSHOTS.md) also includes each exception decision, expanded payment evidence, settlement workpapers, completed states, search, and mobile layouts.
+
+| Daily close | Exceptions |
+| --- | --- |
+| [![Daily close across three locations](docs/screenshots/review/01-close.png)](docs/screenshots/review/01-close.png) | [![Ford's three blocking exceptions](docs/screenshots/review/02-exceptions.png)](docs/screenshots/review/02-exceptions.png) |
+| **Payments** | **Deposits** |
+| [![Payment ledger](docs/screenshots/review/06-payments.png)](docs/screenshots/review/06-payments.png) | [![Deposit ledger](docs/screenshots/review/10-deposits.png)](docs/screenshots/review/10-deposits.png) |
+| **Activity** | **Integrations** |
+| [![Human and system activity](docs/screenshots/review/20-activity.png)](docs/screenshots/review/20-activity.png) | [![Connected simulators and recent attempts](docs/screenshots/review/14-integrations.png)](docs/screenshots/review/14-integrations.png) |
+
+### Inside a decision
+
+Compare the evidence, select the correct repair order, and verify the posting before the exception clears.
+
+[![Ambiguous payment match decision](docs/screenshots/review/03-payment-match.png)](docs/screenshots/review/03-payment-match.png)
 
 ## Reviewing this project?
 
