@@ -1,12 +1,26 @@
 # PostOnce
 
+[![CI](https://github.com/yazanbaker94/postonce/actions/workflows/ci.yml/badge.svg)](https://github.com/yazanbaker94/postonce/actions/workflows/ci.yml)
+
+[Live demo](https://postonce.swoop.video) · [Reviewer guide](docs/REVIEWER_GUIDE.md) · [Screenshot tour](docs/SCREENSHOTS.md) · [Architecture](docs/ARCHITECTURE.md)
+
 **Account for every payment. Resolve the uncertain ones. Close every location with proof.**
 
 PostOnce is an exception-first daily-close workspace for dealership controllers. It combines processor events, dealership-system posting status, operational exceptions, and later bank-deposit reconciliation without pretending those are one workflow. Routine payments stay out of the operator's way; uncertain postings become explicit work with evidence, version checks, and an audit trail.
 
-This repository contains a synthetic evaluation product, not a payment processor. It does not authorize, capture, hold, or move money and is not affiliated with any dealership, DMS, processor, or bank. Every organization, person, payment, repair order, payout, endpoint, and identifier is fictional. No real customer, cardholder, vehicle, bank, or credential data is used.
+This repository contains a synthetic evaluation product, not a payment processor. It does not authorize, capture, hold, or move money and is not affiliated with Anchorbase or any dealership, DMS, processor, or bank. All business data and external-system identities are fictional. No real customer, cardholder, vehicle, bank, or financial-system credential data is used.
 
-![PostOnce daily-close workspace](docs/screenshots/product/01-close-initial.png)
+![PostOnce daily-close workspace: Toyota and Subaru ready, Ford blocked by three exceptions](docs/screenshots/review/01-close.png)
+
+## Reviewing this project?
+
+Start with the [live demo](https://postonce.swoop.video): no signup or installation is required. Open Ford's three exceptions, resolve them, return to Close, and reconcile Subaru's prior-day deposit. The [reviewer guide](docs/REVIEWER_GUIDE.md) connects that journey to the implementation and tests; the [24-image screenshot tour](docs/SCREENSHOTS.md) covers every main screen, the three decision types, evidence, completion states, and mobile layouts.
+
+**Stack:** TypeScript · React · Vite · NestJS · Zod · PostgreSQL · Playwright/Vitest · Docker/Caddy · GitHub Actions.
+
+**Implemented:** API-backed decisions, PostgreSQL persistence in the deployment, shared runtime validation, stale-version rejection, idempotent command replay, and append-only business evidence.
+
+**Deliberately simulated:** external processor/DMS/bank connections, incoming events, recovery scenarios, and the controller identity. There is no live payment processing, production authentication, autonomous AI decision-maker, or independent background outbox worker. See [production boundaries](docs/SECURITY.md).
 
 ## Open the product
 
@@ -16,6 +30,8 @@ This repository contains a synthetic evaluation product, not a payment processor
 The root URL opens the product workspace and resolves to `/app/close`. `/demo` remains only as a compatibility redirect.
 
 The browser creates an isolated synthetic workspace and keeps its identifier in local storage. A workspace-service failure leaves financial actions unavailable and visibly reports the problem; browser-only state is never presented as persisted evidence.
+
+To replay the demo, open **Maya Chen's profile → Reset workspace**. This resets only your browser's synthetic workspace. Demo time is intentionally fixed; the displayed controller is a fictional persona, not a signed-in identity.
 
 ## Canonical operator journey
 
@@ -130,6 +146,8 @@ Use the exact operator procedure in [infra/README.md](infra/README.md). Do not c
 ## Read further
 
 - [Product specification](docs/PRODUCT_SPEC.md)
+- [Reviewer guide and code reading order](docs/REVIEWER_GUIDE.md)
+- [Full screenshot tour](docs/SCREENSHOTS.md)
 - [Operator walkthrough](docs/OPERATOR_WALKTHROUGH.md)
 - [API contract](docs/API_CONTRACT.md)
 - [Architecture](docs/ARCHITECTURE.md)

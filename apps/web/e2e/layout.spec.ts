@@ -89,3 +89,15 @@ test('tablet filters open inside the page', async ({ page }) => {
   const boundsRail = await rail.boundingBox();
   expect(Math.abs(settlement!.x + settlement!.width - boundsRail!.x - boundsRail!.width)).toBeLessThan(2);
 });
+
+test('missing payout components are not presented as zero', async ({ page }) => {
+  await page.goto('/app/deposits/payout_9834');
+  const ledger = page.locator('.po-ledger-lines');
+  for (const label of ['Captured payments', 'Refunds', 'Processor fees']) {
+    const row = ledger.locator(':scope > div').filter({ has: page.getByText(label, { exact: true }) });
+    await expect(row).toContainText('Not available');
+    await expect(row).not.toContainText('$0.00');
+  }
+  await expect(ledger.locator('.po-ledger-observed')).toContainText('$14,884.92');
+  await expect(ledger.locator('.po-ledger-variance')).toContainText('$0.00');
+});
