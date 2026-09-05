@@ -22,6 +22,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "smoke": "node scripts/smoke.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs",
+    "screenshots:review": "node scripts/capture-reviewer-tour.mjs",
     "screenshots:preview": "node scripts/capture-product-preview.mjs",
     "check": "npm run typecheck && npm run test && npm run build",
     "verify": "npm run check && npm run test:e2e --workspace @postonce/web"
